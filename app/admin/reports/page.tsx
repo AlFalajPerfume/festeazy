@@ -626,6 +626,51 @@ export default function ReportsPage() {
     classes,
   ]);
 
+  const generalEntryFormStudentIds = useMemo(() => {
+    if (reportType !== "registration_sheet" || categoryFilter !== "general") {
+      return new Set<string>();
+    }
+
+    const eligibleGeneralProgrammeIds = new Set(
+      programmes
+        .filter((programme) => {
+          if (programme.status !== "active" || programme.category_id) return false;
+
+          const matchesGender =
+            genderFilter === "all" ||
+            programme.gender_scope === "all" ||
+            normalizeGender(programme.gender_scope) === genderFilter;
+
+          const matchesProgramme =
+            programmeFilter === "all" || programme.id === programmeFilter;
+
+          return matchesGender && matchesProgramme;
+        })
+        .map((programme) => programme.id),
+    );
+
+    const studentIds = new Set<string>();
+
+    registrations.forEach((registration) => {
+      if (
+        registration.student_id &&
+        registration.programme_id &&
+        eligibleGeneralProgrammeIds.has(registration.programme_id)
+      ) {
+        studentIds.add(registration.student_id);
+      }
+    });
+
+    return studentIds;
+  }, [
+    reportType,
+    categoryFilter,
+    programmes,
+    registrations,
+    genderFilter,
+    programmeFilter,
+  ]);
+
   const entryFormDivisionOptions = useMemo(() => {
     const matchingDivisionIds = new Set(
       students
@@ -636,7 +681,9 @@ export default function ReportsPage() {
           const matchesCategory =
             categoryFilter === "all" ||
             (categoryFilter === "general"
-              ? !student.category_id
+              ? reportType === "registration_sheet"
+                ? generalEntryFormStudentIds.has(student.id)
+                : !student.category_id
               : student.category_id === categoryFilter);
 
           const matchesClass =
@@ -698,6 +745,8 @@ export default function ReportsPage() {
     classFilter,
     genderFilter,
     teamFilter,
+    reportType,
+    generalEntryFormStudentIds,
   ]);
 
   useEffect(() => {
@@ -756,7 +805,7 @@ export default function ReportsPage() {
         const matchesCategory =
           categoryFilter === "all" ||
           (categoryFilter === "general"
-            ? !student.category_id
+            ? generalEntryFormStudentIds.has(student.id)
             : student.category_id === categoryFilter);
 
         const matchesClass =
@@ -812,6 +861,7 @@ export default function ReportsPage() {
     teamFilter,
     programmeFilter,
     registrations,
+    generalEntryFormStudentIds,
   ]);
 
   const registrationSheetProgrammes = useMemo(() => {
