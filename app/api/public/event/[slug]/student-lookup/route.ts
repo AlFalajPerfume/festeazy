@@ -675,32 +675,22 @@ export async function POST(
         (divisionRows || []).map((row: any) => [String(row.id), String(row.name || "")]),
       );
 
-      const nameCount = new Map<string, number>();
-      matchingStudents.forEach((row) => {
-        const key = normalize(row.name);
-        nameCount.set(key, (nameCount.get(key) || 0) + 1);
-      });
-
       return NextResponse.json({
         success: true,
         students: matchingStudents.map((row) => {
           const divisionName = row.division_id
             ? divisionMap.get(String(row.division_id)) || ""
             : "";
-          const duplicateName = (nameCount.get(normalize(row.name)) || 0) > 1;
           const chest = cleanChest(row.chest_no);
-          const chestHint =
-            duplicateName && chest
-              ? chest.length <= 2
-                ? chest
-                : chest.slice(-2)
-              : "";
 
           return {
             id: String(row.id),
             name: String(row.name || "Student"),
             divisionName,
-            chestHint,
+            // Return the complete chest number for every student.
+            // The searchable dropdown needs the real value (including 4+ digits),
+            // not only the last two digits used by the old duplicate-name hint.
+            chestHint: chest,
           };
         }),
       });

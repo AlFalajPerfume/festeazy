@@ -818,14 +818,14 @@ export default function ParentStudentProgrammeLookupPage() {
               }))}
             />
 
-            <SelectField
+            <SearchableStudentField
               label="3. Student"
               value={selectedStudentId}
               onChange={(value) => void handleStudentChange(value)}
               placeholder={
                 selectedGender
                   ? students.length > 0
-                    ? "Select student"
+                    ? "Search or select student"
                     : isSearching
                       ? "Loading students..."
                       : "No students available"
@@ -837,16 +837,7 @@ export default function ParentStudentProgrammeLookupPage() {
                 !selectedGender ||
                 students.length === 0
               }
-              options={students.map((item) => ({
-                value: item.id,
-                label: [
-                  item.name,
-                  item.divisionName ? `• ${item.divisionName}` : "",
-                  item.chestHint ? `• Chest ••${item.chestHint}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" "),
-              }))}
+              students={students}
             />
           </div>
 
@@ -1101,6 +1092,230 @@ function SelectField({
         </span>
       </div>
     </label>
+  );
+}
+
+function SearchableStudentField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  students,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  disabled: boolean;
+  students: StudentOption[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selectedStudent =
+    students.find((student) => student.id === value) || null;
+
+  function getStudentChest(student: StudentOption) {
+    // The public lookup API now returns the complete chest number in chestHint.
+    // Never guess a chest number from the beginning of the student's name.
+    const chest = cleanChest(student.chestHint);
+    return chest && chest !== "-" ? chest : "";
+  }
+
+  function getStudentDisplayName(student: StudentOption) {
+    return String(student.name || "Student").trim();
+  }
+
+  function chestBadgeWidth(chest: string) {
+    // Keep short chest numbers compact but allow 3, 4, 5+ digit numbers
+    // to expand without clipping.
+    const digits = Math.max(1, chest.length);
+    return Math.max(48, Math.min(112, 28 + digits * 10));
+  }
+
+  const filteredStudents = useMemo(() => {
+    const keyword = normalizeText(query);
+
+    if (!keyword) return students;
+
+    return students.filter((student) => {
+      const searchableText = [
+        student.name,
+        student.chestHint,
+        getStudentChest(student),
+        getStudentDisplayName(student),
+        student.divisionName,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(keyword);
+    });
+  }, [students, query]);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+      setQuery("");
+    }
+  }, [disabled]);
+
+  return (
+    <div
+      className="relative"
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget as Node | null;
+
+        if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+          setIsOpen(false);
+          setQuery("");
+        }
+      }}
+    >
+      <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </span>
+
+      <button
+        type="button"
+        disabled={disabled}
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (disabled) return;
+          setIsOpen((current) => !current);
+          setQuery("");
+        }}
+        className="flex h-14 w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-left outline-none transition hover:bg-white focus:border-[var(--lookup-primary)] focus:bg-white focus:ring-4 focus:ring-[var(--lookup-soft)] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <div className="min-w-0">
+          {selectedStudent ? (
+            <>
+              <p className="truncate text-sm font-black text-slate-950">
+                {getStudentDisplayName(selectedStudent)}
+              </p>
+              <p className="mt-0.5 truncate text-[10px] font-bold text-slate-400">
+                {[
+                  getStudentChest(selectedStudent)
+                    ? `Chest #${getStudentChest(selectedStudent)}`
+                    : "",
+                  selectedStudent.divisionName || "",
+                ]
+                  .filter(Boolean)
+                  .join(" • ")}
+              </p>
+            </>
+          ) : (
+            <p className="truncate text-sm font-black text-slate-500">
+              {placeholder}
+            </p>
+          )}
+        </div>
+
+        <span
+          className={`shrink-0 text-xs font-black text-slate-400 transition ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        >
+          ▾
+        </span>
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-[1.4rem] border border-slate-200 bg-white shadow-2xl shadow-slate-900/15">
+          <div className="border-b border-slate-100 p-3">
+            <div className="relative">
+              <Search
+                size={18}
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search name, chest no or division..."
+                className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm font-bold text-slate-950 outline-none transition focus:border-[var(--lookup-primary)] focus:bg-white focus:ring-4 focus:ring-[var(--lookup-soft)]"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-80 overflow-y-auto p-2">
+            {filteredStudents.length === 0 ? (
+              <div className="px-4 py-8 text-center">
+                <Search size={22} className="mx-auto text-slate-300" />
+                <p className="mt-2 text-sm font-black text-slate-600">
+                  No student found
+                </p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">
+                  Try another name or chest number.
+                </p>
+              </div>
+            ) : (
+              filteredStudents.map((student) => {
+                const selected = student.id === value;
+                const chest = getStudentChest(student);
+                const displayName = getStudentDisplayName(student);
+
+                return (
+                  <button
+                    key={student.id}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      onChange(student.id);
+                      setIsOpen(false);
+                      setQuery("");
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
+                      selected
+                        ? "bg-[var(--lookup-soft)]"
+                        : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <div
+                      className="flex h-11 shrink-0 items-center justify-center rounded-xl px-2 text-xs font-black tabular-nums"
+                      style={{
+                        width: `${chestBadgeWidth(chest)}px`,
+                        background: selected
+                          ? "var(--lookup-primary)"
+                          : "#f1f5f9",
+                        color: selected ? "white" : "#64748b",
+                      }}
+                      title={chest ? `Chest #${chest}` : "Chest number unavailable"}
+                    >
+                      {chest || "—"}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-black text-slate-950">
+                        {displayName}
+                      </p>
+                      <p className="mt-1 truncate text-[11px] font-bold text-slate-400">
+                        {[
+                          chest ? `Chest #${chest}` : "",
+                          student.divisionName || "",
+                        ]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </p>
+                    </div>
+
+                    {selected && (
+                      <BadgeCheck
+                        size={19}
+                        className="shrink-0"
+                        style={{ color: "var(--lookup-primary)" }}
+                      />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

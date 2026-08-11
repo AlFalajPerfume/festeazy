@@ -3468,8 +3468,8 @@ export default function ReportsPage() {
                         />
                         <p className="mt-2 text-[11px] font-bold leading-4 text-slate-400">
                           Assigned programmes always appear. Extra columns stay
-                          blank for handwritten additions. Maximum custom value:
-                          30.
+                          blank for handwritten additions. Fewer columns automatically
+                          print with larger, easier-to-read text. Maximum custom value: 30.
                         </p>
                       </SelectBox>
 
@@ -4518,10 +4518,24 @@ function RegistrationSheetPreview({
     registeredProgrammeIdsByStudent.set(registration.student_id, current);
   });
 
-  // Keep the compact original header height. Long programme titles are
-  // split only at spaces, then the complete line group is rotated.
-  const programmeHeaderHeightPx = 144;
-  const rowsPerPage = 14;
+  // Entry Form readability is adaptive. When the administrator reduces the
+  // programme-column count, use the freed page space for larger text and rows
+  // instead of keeping the same tiny typography. Dense forms still stay compact.
+  const entryFormDensity =
+    totalProgrammeColumns <= 8
+      ? { bodyFontPx: 12, rowHeightPx: 40, headerScale: 1.35, rowsPerPage: 11 }
+      : totalProgrammeColumns <= 12
+        ? { bodyFontPx: 11, rowHeightPx: 37, headerScale: 1.2, rowsPerPage: 12 }
+        : totalProgrammeColumns <= 18
+          ? { bodyFontPx: 10, rowHeightPx: 34, headerScale: 1.1, rowsPerPage: 13 }
+          : totalProgrammeColumns <= 24
+            ? { bodyFontPx: 9, rowHeightPx: 31, headerScale: 1, rowsPerPage: 14 }
+            : { bodyFontPx: 8.2, rowHeightPx: 29, headerScale: 0.94, rowsPerPage: 14 };
+
+  // Long programme titles are split only at spaces, then the complete line
+  // group is rotated. Keep enough vertical header room even in readable mode.
+  const programmeHeaderHeightPx = totalProgrammeColumns <= 12 ? 150 : 144;
+  const rowsPerPage = entryFormDensity.rowsPerPage;
 
   function getProgrammeHeaderLines(name: string) {
     const normalizedName = String(name || "")
@@ -4576,11 +4590,18 @@ function RegistrationSheetPreview({
       ...lines.map((line) => line.length),
     );
 
-    if (longestLine > 22) return 6.8;
-    if (longestLine > 18) return 7.2;
-    if (lines.length === 3) return 7.4;
-    if (lines.length === 2) return 7.8;
-    return 8.4;
+    const baseSize =
+      longestLine > 22
+        ? 6.8
+        : longestLine > 18
+          ? 7.2
+          : lines.length === 3
+            ? 7.4
+            : lines.length === 2
+              ? 7.8
+              : 8.4;
+
+    return Math.min(11.2, baseSize * entryFormDensity.headerScale);
   }
   type RegistrationPreviewPage = {
     rowIndexes: number[];
@@ -4693,7 +4714,10 @@ function RegistrationSheetPreview({
           </div>
 
           <div className="overflow-hidden p-4 pt-3">
-            <table className="registration-sheet-table w-full border-collapse border border-black text-center text-[9px]">
+            <table
+              className="registration-sheet-table w-full border-collapse border border-black text-center"
+              style={{ fontSize: `${entryFormDensity.bodyFontPx}px` }}
+            >
               <thead>
                 <tr style={{ height: `${programmeHeaderHeightPx}px` }}>
                   <th className="w-[5%] border border-black px-2 text-xs font-black">
@@ -4788,7 +4812,10 @@ function RegistrationSheetPreview({
                     : new Set<string>();
 
                   return (
-                    <tr key={absoluteIndex} className="h-8">
+                    <tr
+                      key={absoluteIndex}
+                      style={{ height: `${entryFormDensity.rowHeightPx}px` }}
+                    >
                       <td className="border border-black px-1 font-bold">
                         {student ? absoluteIndex + 1 : ""}
                       </td>
@@ -4799,7 +4826,7 @@ function RegistrationSheetPreview({
                         </td>
                       )}
 
-                      <td className="border border-black px-2 text-left font-bold">
+                      <td className="border border-black px-2 text-left font-bold leading-tight">
                         {student?.name || ""}
                       </td>
 
