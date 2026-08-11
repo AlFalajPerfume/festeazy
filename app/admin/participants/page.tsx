@@ -130,6 +130,13 @@ type RegisteredEntry = {
   studentIds: string[];
 };
 
+function formatPartyName(value: string | null | undefined) {
+  const name = String(value || "").trim();
+  if (!name) return "";
+
+  return /\band\s+party$/i.test(name) ? name : `${name} and Party`;
+}
+
 export default function ParticipantsPage() {
   const [orgUser, setOrgUser] = useState<OrganizationUser | null>(null);
   const [eventInfo, setEventInfo] = useState<EventInfo | null>(null);
@@ -216,6 +223,16 @@ export default function ParticipantsPage() {
     return programmes.find((item) => item.id === selectedProgrammeId) || null;
   }, [programmes, selectedProgrammeId]);
 
+  useEffect(() => {
+    if (activeProgramme?.programme_type !== "group") {
+      setGroupName("");
+      return;
+    }
+
+    const leader = getStudent(selectedStudentIds[0] || null);
+    setGroupName(formatPartyName(leader?.name));
+  }, [activeProgramme?.id, activeProgramme?.programme_type, selectedStudentIds, students]);
+
   const activeRegistrations = useMemo(() => {
     if (!activeProgramme) return [];
     return registrations.filter(
@@ -281,7 +298,10 @@ export default function ParticipantsPage() {
 
     return registeredEntries.filter((entry) => {
       const teamName = getTeamName(entry.teamId).toLowerCase();
-      const groupNameText = String(entry.groupName || "").toLowerCase();
+      const groupNameText =
+        entry.type === "group"
+          ? getGroupDisplayName(entry).toLowerCase()
+          : String(entry.groupName || "").toLowerCase();
 
       if (teamName.includes(keyword) || groupNameText.includes(keyword)) {
         return true;
@@ -752,6 +772,14 @@ export default function ParticipantsPage() {
     return students.find((item) => item.id === id) || null;
   }
 
+  function getGroupDisplayName(entry: RegisteredEntry) {
+    const storedName = formatPartyName(entry.groupName);
+    if (storedName) return storedName;
+
+    const leader = getStudent(entry.studentIds[0] || null);
+    return formatPartyName(leader?.name) || "Group and Party";
+  }
+
   function getTeamName(id: string | null) {
     return teams.find((item) => item.id === id)?.name || "-";
   }
@@ -905,7 +933,7 @@ export default function ParticipantsPage() {
     }
 
     if (activeProgramme.programme_type === "group" && !groupName.trim()) {
-      setError("Please enter group name.");
+      setError("Please select the group leader first.");
       return;
     }
 
@@ -1041,7 +1069,7 @@ export default function ParticipantsPage() {
   async function deleteRegistration(entry: RegisteredEntry) {
     const confirmed = window.confirm(
       entry.type === "group"
-        ? `Delete group "${entry.groupName}"?`
+        ? `Delete group "${getGroupDisplayName(entry)}"?`
         : "Delete this participant?",
     );
 
@@ -1348,7 +1376,7 @@ export default function ParticipantsPage() {
                         <div className="min-w-0">
                           <p className="text-base font-black text-slate-950">
                             {entry.type === "group"
-                              ? entry.groupName
+                              ? getGroupDisplayName(entry)
                               : `#${normalizeChest(firstStudent?.chest_no || "")} ${firstStudent?.name || "Student"}`}
                           </p>
                           <p className="mt-1 text-xs font-bold text-slate-500">
@@ -1428,7 +1456,7 @@ export default function ParticipantsPage() {
                           {entry.type === "group" ? (
                             <>
                               <p className="text-sm font-black text-slate-950">
-                                {entry.groupName}
+                                {getGroupDisplayName(entry)}
                               </p>
                               <p className="mt-1 text-xs font-bold text-slate-500">
                                 Group Programme
@@ -1536,7 +1564,6 @@ export default function ParticipantsPage() {
               setSelectedTeamId(value);
               setSelectedStudentIds([]);
             }}
-            onGroupNameChange={setGroupName}
             onSearchChange={setStudentSearch}
           />
         )}
@@ -1613,7 +1640,6 @@ function AddParticipantsModal({
   onToggleStudent,
   onSetSelectedStudentIds,
   onTeamChange,
-  onGroupNameChange,
   onSearchChange,
 }: {
   programme: Programme;
@@ -1639,7 +1665,6 @@ function AddParticipantsModal({
   onToggleStudent: (studentId: string) => void;
   onSetSelectedStudentIds: (studentIds: string[]) => void;
   onTeamChange: (value: string) => void;
-  onGroupNameChange: (value: string) => void;
   onSearchChange: (value: string) => void;
 }) {
   const isGroup = programme.programme_type === "group";
@@ -1801,14 +1826,14 @@ function AddParticipantsModal({
 
               <div>
                 <label className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                  Group Name *
+                  Group Name (Automatic)
                 </label>
-                <input
-                  value={groupName}
-                  onChange={(event) => onGroupNameChange(event.target.value)}
-                  placeholder="e.g. Red Quiz Team 1"
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-                />
+                <div className="mt-2 min-h-[46px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-800">
+                  {groupName || "Select the first student below"}
+                </div>
+                <p className="mt-1.5 text-[11px] font-bold leading-4 text-slate-500">
+                  The first student you select becomes the group leader and the name is saved as “Name and Party”.
+                </p>
               </div>
             </div>
           )}
@@ -1989,9 +2014,16 @@ function AddParticipantsModal({
                       }`}
                     >
                       <div>
-                        <p className="text-sm font-black text-slate-950">
-                          #{normalizeChest(student.chest_no)} {student.name}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-black text-slate-950">
+                            #{normalizeChest(student.chest_no)} {student.name}
+                          </p>
+                          {isGroup && selectedStudentIds[0] === student.id && (
+                            <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                              Leader
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-1 text-xs font-bold text-slate-500">
                           {[
                             normalizeGender(student.gender) === "female"

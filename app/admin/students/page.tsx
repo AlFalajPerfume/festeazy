@@ -210,6 +210,10 @@ export default function StudentsPage() {
   const [bulkForm, setBulkForm] = useState<BulkForm>(EMPTY_BULK_FORM);
   const [isSingleModalOpen, setIsSingleModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isChestRebuildOpen, setIsChestRebuildOpen] = useState(false);
+  const [chestRebuildCode, setChestRebuildCode] = useState("");
+  const [chestRebuildError, setChestRebuildError] = useState("");
+  const [isRebuildingChest, setIsRebuildingChest] = useState(false);
 
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -573,7 +577,7 @@ export default function StudentsPage() {
   }
 
   async function callStudentApi(
-    method: "POST" | "PUT" | "DELETE",
+    method: "POST" | "PUT" | "PATCH" | "DELETE",
     body: Record<string, unknown>,
   ) {
     const {
@@ -742,6 +746,63 @@ export default function StudentsPage() {
     }
   }
 
+  function openChestRebuild() {
+    setChestRebuildCode("");
+    setChestRebuildError("");
+    setError("");
+    setMessage("");
+    setIsChestRebuildOpen(true);
+  }
+
+  function closeChestRebuild() {
+    if (isRebuildingChest) return;
+    setIsChestRebuildOpen(false);
+    setChestRebuildCode("");
+    setChestRebuildError("");
+  }
+
+  async function rebuildChestNumbers(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setChestRebuildError("");
+
+    if (chestRebuildCode.trim() !== "EAzy2026") {
+      setChestRebuildError("Incorrect maintenance code.");
+      return;
+    }
+
+    setIsRebuildingChest(true);
+
+    try {
+      const payload = await callStudentApi("PATCH", {
+        action: "rebuild_chest_numbers",
+        safetyCode: chestRebuildCode.trim(),
+      });
+
+      const updated = Number(payload?.result?.updated || 0);
+      const categoryCount = Number(payload?.result?.categories || 0);
+
+      setIsChestRebuildOpen(false);
+      setChestRebuildCode("");
+      setChestRebuildError("");
+      setPage(1);
+
+      await loadWorkspace(true);
+      await loadStudents();
+
+      setMessage(
+        updated > 0
+          ? `Chest numbers rebuilt for ${updated} student${updated === 1 ? "" : "s"} across ${categoryCount} categor${categoryCount === 1 ? "y" : "ies"}.`
+          : "Chest numbers are already correct. No changes were needed.",
+      );
+    } catch (rebuildError: any) {
+      setChestRebuildError(
+        rebuildError?.message || "Unable to rebuild chest numbers.",
+      );
+    } finally {
+      setIsRebuildingChest(false);
+    }
+  }
+
   function resetFilters() {
     setSearchText("");
     setDebouncedSearch("");
@@ -876,6 +937,20 @@ export default function StudentsPage() {
                   className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-bold outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={openChestRebuild}
+                disabled={refreshing || isRebuildingChest}
+                title="Rebuild Chest Numbers"
+                aria-label="Rebuild Chest Numbers"
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 text-violet-700 shadow-sm transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCcw
+                  size={18}
+                  className={isRebuildingChest ? "animate-spin" : ""}
+                />
+              </button>
 
               <button
                 type="button"
@@ -1262,6 +1337,87 @@ export default function StudentsPage() {
           )}
         </section>
       </div>
+
+      {isChestRebuildOpen && (
+        <ModalShell
+          title="Rebuild Chest Numbers"
+          subtitle="Reassign chest numbers using the ranges configured in Categories."
+          onClose={closeChestRebuild}
+          isBusy={isRebuildingChest}
+        >
+          <form onSubmit={rebuildChestNumbers}>
+            <div className="space-y-4 px-5 py-5 sm:px-6">
+              {chestRebuildError && (
+                <Notice
+                  tone="error"
+                  onClose={() => setChestRebuildError("")}
+                >
+                  {chestRebuildError}
+                </Notice>
+              )}
+
+              <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+                <p className="text-sm font-black text-violet-950">
+                  Chest number repair
+                </p>
+                <p className="mt-1 text-xs font-bold leading-5 text-violet-800">
+                  FestEazy will validate every used category range first, then
+                  rebuild student chest numbers in a stable order. Student IDs,
+                  programme registrations, marks and results are not changed.
+                </p>
+              </div>
+
+              <Field label="Maintenance Code">
+                <input
+                  type="password"
+                  autoFocus
+                  value={chestRebuildCode}
+                  onChange={(event) => {
+                    setChestRebuildCode(event.target.value);
+                    if (chestRebuildError) setChestRebuildError("");
+                  }}
+                  placeholder="Enter maintenance code"
+                  className="student-input"
+                />
+              </Field>
+
+              <p className="text-[11px] font-bold leading-5 text-slate-500">
+                If a category has no range, overlapping ranges, or too many
+                students for its range, nothing will be changed and FestEazy
+                will tell you what needs to be fixed.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+              <button
+                type="button"
+                onClick={closeChestRebuild}
+                disabled={isRebuildingChest}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isRebuildingChest || !chestRebuildCode.trim()}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-black text-white shadow-lg shadow-violet-900/20 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isRebuildingChest ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Rebuilding...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCcw size={16} />
+                    Rebuild
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      )}
 
       {isSingleModalOpen && (
         <ModalShell
