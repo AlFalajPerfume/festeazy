@@ -1133,7 +1133,7 @@ export default function ReportsPage() {
       const programmeCompare = a.programmeName.localeCompare(b.programmeName);
       if (programmeCompare !== 0) return programmeCompare;
 
-      return chestNumber(a.chestNo) - chestNumber(b.chestNo);
+      return entryChestNumber(a.chestNo) - entryChestNumber(b.chestNo);
     });
   }, [
     filteredProgrammes,
@@ -1471,7 +1471,7 @@ export default function ReportsPage() {
       if (b.offStagePoints !== a.offStagePoints) {
         return b.offStagePoints - a.offStagePoints;
       }
-      return chestNumber(a.chestNo) - chestNumber(b.chestNo);
+      return entryChestNumber(a.chestNo) - entryChestNumber(b.chestNo);
     });
 
     let lastPoints: number | null = null;
@@ -6564,6 +6564,11 @@ function codeSequenceValue(value: string | null | undefined) {
   }, 0);
 }
 
+function entryChestNumber(value: string | null | undefined) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+}
+
 function compareEntriesByCode(a: ParticipantEntry, b: ParticipantEntry) {
   const firstCode = String(a.codeLetter || "")
     .trim()
@@ -6574,7 +6579,7 @@ function compareEntriesByCode(a: ParticipantEntry, b: ParticipantEntry) {
 
   // Rows without a generated code stay at the bottom of Green Room sheets.
   if (!firstCode && !secondCode) {
-    return chestNumber(a.chestNo) - chestNumber(b.chestNo);
+    return entryChestNumber(a.chestNo) - entryChestNumber(b.chestNo);
   }
   if (!firstCode) return 1;
   if (!secondCode) return -1;
@@ -6596,7 +6601,7 @@ function compareEntriesByCode(a: ParticipantEntry, b: ParticipantEntry) {
   }
 
   // Stable fallback if two rows somehow have the same code.
-  const chestCompare = chestNumber(a.chestNo) - chestNumber(b.chestNo);
+  const chestCompare = entryChestNumber(a.chestNo) - entryChestNumber(b.chestNo);
   if (chestCompare !== 0) return chestCompare;
 
   return a.participantName.localeCompare(b.participantName);
