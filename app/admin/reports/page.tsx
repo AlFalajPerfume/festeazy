@@ -2351,6 +2351,7 @@ export default function ReportsPage() {
       return groupEntriesByProgramme(participantEntries).flatMap((entries) =>
         entries
           .filter((entry) => entry.codeLetter && entry.isPresent)
+          .sort(compareEntriesByCode)
           .map((entry, index) => ({
             No: index + 1,
             Programme: entry.programmeName,
@@ -2404,7 +2405,14 @@ export default function ReportsPage() {
     }
 
     if (reportType === "green_room" || reportType === "call_list") {
-      return participantEntries.map((entry, index) => ({
+      const exportEntries =
+        reportType === "green_room"
+          ? groupEntriesByProgramme(participantEntries).flatMap((entries) =>
+              [...entries].sort(compareEntriesByCode),
+            )
+          : participantEntries;
+
+      return exportEntries.map((entry, index) => ({
         No: index + 1,
         Programme: entry.programmeName,
         Category: entry.categoryName,
@@ -5561,10 +5569,17 @@ function ProgrammeWiseSheets({
               ? "Judge mark entry sheet"
               : "Stage calling sheet";
 
-        const displayEntries =
+        const baseDisplayEntries =
           type === "valuation_sheet"
             ? entries.filter((entry) => entry.codeLetter && entry.isPresent)
             : entries;
+
+        // Green Room and Valuation Sheet must follow the generated code order
+        // (A, B, C ... Z, AA, AB ...), not registration/chest order.
+        const displayEntries =
+          type === "green_room" || type === "valuation_sheet"
+            ? [...baseDisplayEntries].sort(compareEntriesByCode)
+            : baseDisplayEntries;
 
         const pages = paginateProgrammeEntries(
           displayEntries,
@@ -6533,6 +6548,58 @@ function TeamWiseReport({
       ))}
     </div>
   );
+}
+
+function codeSequenceValue(value: string | null | undefined) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (!normalized || !/^[A-Z]+$/.test(normalized)) return null;
+
+  // Treat code letters like spreadsheet columns:
+  // A=1, B=2, ... Z=26, AA=27, AB=28 ...
+  return normalized.split("").reduce((total, letter) => {
+    return total * 26 + (letter.charCodeAt(0) - 64);
+  }, 0);
+}
+
+function compareEntriesByCode(a: ParticipantEntry, b: ParticipantEntry) {
+  const firstCode = String(a.codeLetter || "")
+    .trim()
+    .toUpperCase();
+  const secondCode = String(b.codeLetter || "")
+    .trim()
+    .toUpperCase();
+
+  // Rows without a generated code stay at the bottom of Green Room sheets.
+  if (!firstCode && !secondCode) {
+    return chestNumber(a.chestNo) - chestNumber(b.chestNo);
+  }
+  if (!firstCode) return 1;
+  if (!secondCode) return -1;
+
+  const firstSequence = codeSequenceValue(firstCode);
+  const secondSequence = codeSequenceValue(secondCode);
+
+  if (firstSequence !== null && secondSequence !== null) {
+    if (firstSequence !== secondSequence) {
+      return firstSequence - secondSequence;
+    }
+  } else {
+    const codeCompare = firstCode.localeCompare(secondCode, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    if (codeCompare !== 0) return codeCompare;
+  }
+
+  // Stable fallback if two rows somehow have the same code.
+  const chestCompare = chestNumber(a.chestNo) - chestNumber(b.chestNo);
+  if (chestCompare !== 0) return chestCompare;
+
+  return a.participantName.localeCompare(b.participantName);
 }
 
 function groupEntriesByProgramme(entries: ParticipantEntry[]) {
