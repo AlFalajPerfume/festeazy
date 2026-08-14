@@ -58,6 +58,7 @@ type Programme = {
   programme_type: string;
   stage_type: string;
   category_id: string | null;
+  gender_scope: string;
   sort_order: number;
 };
 
@@ -174,7 +175,7 @@ export default function JudgesPage() {
         supabase
           .from("programmes")
           .select(
-            "id, name, programme_type, stage_type, category_id, sort_order",
+            "id, name, programme_type, stage_type, category_id, gender_scope, sort_order",
           )
           .eq("event_id", activeEvent.id)
           .eq("status", "active")
@@ -688,6 +689,7 @@ export default function JudgesPage() {
             title={editingId ? "Edit Judge" : "Add Judge"}
             form={form}
             programmes={programmes}
+            categories={categories}
             getCategoryName={getCategoryName}
             error={error}
             isSaving={isSaving}
@@ -750,6 +752,7 @@ function JudgeModal({
   title,
   form,
   programmes,
+  categories,
   getCategoryName,
   error,
   isSaving,
@@ -766,6 +769,7 @@ function JudgeModal({
   title: string;
   form: JudgeForm;
   programmes: Programme[];
+  categories: Category[];
   getCategoryName: (id: string | null) => string;
   error: string;
   isSaving: boolean;
@@ -780,45 +784,89 @@ function JudgeModal({
   submitLabel: string;
 }) {
   const [programmePickerValue, setProgrammePickerValue] = useState("");
-  const [programmeFilter, setProgrammeFilter] = useState<
-    "all" | "stage" | "off_stage"
-  >("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState("all");
 
-  const programmeCounts = useMemo(
-    () => ({
-      all: programmes.length,
-      stage: programmes.filter(
-        (programme) => programme.stage_type !== "off_stage",
-      ).length,
-      off_stage: programmes.filter(
-        (programme) => programme.stage_type === "off_stage",
-      ).length,
-    }),
-    [programmes],
-  );
+  function normalizeGender(value: string | null | undefined) {
+    const normalized = String(value || "").trim().toLowerCase();
+
+    if (normalized.includes("female") || normalized.includes("girl")) {
+      return "female";
+    }
+
+    if (normalized.includes("male") || normalized.includes("boy")) {
+      return "male";
+    }
+
+    return "all";
+  }
+
+  function normalizeStage(value: string | null | undefined) {
+    const normalized = String(value || "stage")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/-/g, "_");
+
+    return normalized === "off_stage" || normalized === "offstage"
+      ? "off_stage"
+      : "stage";
+  }
 
   const filteredProgrammes = useMemo(() => {
     return programmes
       .filter((programme) => {
-        if (programmeFilter === "all") return true;
-        if (programmeFilter === "off_stage") {
-          return programme.stage_type === "off_stage";
-        }
-        return programme.stage_type !== "off_stage";
+        const matchesCategory =
+          categoryFilter === "all" ||
+          (categoryFilter === "general"
+            ? !programme.category_id
+            : programme.category_id === categoryFilter);
+
+        const normalizedGender = normalizeGender(programme.gender_scope);
+        const matchesGender =
+          genderFilter === "all" ||
+          (genderFilter === "mixed"
+            ? normalizedGender === "all"
+            : normalizedGender === genderFilter);
+
+        const matchesType =
+          typeFilter === "all" || programme.programme_type === typeFilter;
+
+        const matchesStage =
+          stageFilter === "all" ||
+          normalizeStage(programme.stage_type) === stageFilter;
+
+        return matchesCategory && matchesGender && matchesType && matchesStage;
       })
-      .sort(
-        (a, b) => Number(a.sort_order || 9999) - Number(b.sort_order || 9999),
-      );
-  }, [programmes, programmeFilter]);
+      .sort((a, b) => {
+        const firstOrder = Number(a.sort_order || 9999);
+        const secondOrder = Number(b.sort_order || 9999);
+
+        if (firstOrder !== secondOrder) return firstOrder - secondOrder;
+        return a.name.localeCompare(b.name);
+      });
+  }, [
+    programmes,
+    categoryFilter,
+    genderFilter,
+    typeFilter,
+    stageFilter,
+  ]);
 
   const selectedProgrammes = useMemo(() => {
     const selectedIds = new Set(form.programme_ids);
 
     return programmes
       .filter((programme) => selectedIds.has(programme.id))
-      .sort(
-        (a, b) => Number(a.sort_order || 9999) - Number(b.sort_order || 9999),
-      );
+      .sort((a, b) => {
+        const firstOrder = Number(a.sort_order || 9999);
+        const secondOrder = Number(b.sort_order || 9999);
+
+        if (firstOrder !== secondOrder) return firstOrder - secondOrder;
+        return a.name.localeCompare(b.name);
+      });
   }, [programmes, form.programme_ids]);
 
   const filteredSelectedProgrammes = useMemo(() => {
@@ -835,12 +883,19 @@ function JudgeModal({
     );
   }, [filteredProgrammes, form.programme_ids]);
 
-  const filterLabel =
-    programmeFilter === "stage"
-      ? "Stage"
-      : programmeFilter === "off_stage"
-        ? "Off-stage"
-        : "All";
+  const hasProgrammeFilters =
+    categoryFilter !== "all" ||
+    genderFilter !== "all" ||
+    typeFilter !== "all" ||
+    stageFilter !== "all";
+
+  function resetProgrammeFilters() {
+    setCategoryFilter("all");
+    setGenderFilter("all");
+    setTypeFilter("all");
+    setStageFilter("all");
+    setProgrammePickerValue("");
+  }
 
   function addProgramme(programmeId: string) {
     if (!programmeId) return;
@@ -987,8 +1042,8 @@ function JudgeModal({
                 Assign Programmes
               </p>
               <p className="mt-1 text-xs font-bold text-slate-500">
-                Search a programme and add it to this judge. Judge can enter
-                marks only for assigned programmes.
+                Filter the programme list, then assign only the programmes this
+                judge should value.
               </p>
             </div>
 
@@ -999,71 +1054,105 @@ function JudgeModal({
                 </div>
               ) : (
                 <>
-                  <div>
-                    <label className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                      Filter Programmes
-                    </label>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-slate-950">
+                          Programme Filters
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">
+                          Narrow the programme list before assigning to this judge.
+                        </p>
+                      </div>
 
-                    <div className="grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1">
-                      {([
-                        {
-                          value: "all" as const,
-                          label: "All",
-                          count: programmeCounts.all,
-                        },
-                        {
-                          value: "stage" as const,
-                          label: "Stage",
-                          count: programmeCounts.stage,
-                        },
-                        {
-                          value: "off_stage" as const,
-                          label: "Off-stage",
-                          count: programmeCounts.off_stage,
-                        },
-                      ]).map((filter) => {
-                        const isActive = programmeFilter === filter.value;
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-700 shadow-sm ring-1 ring-slate-200">
+                          {filteredProgrammes.length} matching
+                        </span>
 
-                        return (
+                        {hasProgrammeFilters && (
                           <button
-                            key={filter.value}
                             type="button"
-                            onClick={() => {
-                              setProgrammeFilter(filter.value);
-                              setProgrammePickerValue("");
-                            }}
-                            className={`rounded-xl px-2 py-2.5 text-xs font-black transition sm:px-4 ${
-                              isActive
-                                ? "bg-white text-violet-700 shadow-sm"
-                                : "text-slate-500 hover:text-slate-800"
-                            }`}
+                            onClick={resetProgrammeFilters}
+                            className="text-xs font-black text-violet-700 hover:text-violet-900"
                           >
-                            <span>{filter.label}</span>
-                            <span
-                              className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] ${
-                                isActive
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "bg-slate-200 text-slate-600"
-                              }`}
-                            >
-                              {filter.count}
-                            </span>
+                            Clear Filters
                           </button>
-                        );
-                      })}
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <select
+                        value={categoryFilter}
+                        onChange={(event) => {
+                          setCategoryFilter(event.target.value);
+                          setProgrammePickerValue("");
+                        }}
+                        className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                      >
+                        <option value="all">All Categories</option>
+                        {programmes.some((programme) => !programme.category_id) && (
+                          <option value="general">General</option>
+                        )}
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={genderFilter}
+                        onChange={(event) => {
+                          setGenderFilter(event.target.value);
+                          setProgrammePickerValue("");
+                        }}
+                        className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                      >
+                        <option value="all">All Genders</option>
+                        <option value="male">Boys</option>
+                        <option value="female">Girls</option>
+                        <option value="mixed">Mixed / All</option>
+                      </select>
+
+                      <select
+                        value={typeFilter}
+                        onChange={(event) => {
+                          setTypeFilter(event.target.value);
+                          setProgrammePickerValue("");
+                        }}
+                        className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                      >
+                        <option value="all">All Types</option>
+                        <option value="individual">Individual</option>
+                        <option value="group">Group</option>
+                      </select>
+
+                      <select
+                        value={stageFilter}
+                        onChange={(event) => {
+                          setStageFilter(event.target.value);
+                          setProgrammePickerValue("");
+                        }}
+                        className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                      >
+                        <option value="all">All Locations</option>
+                        <option value="stage">Stage</option>
+                        <option value="off_stage">Off-stage</option>
+                      </select>
                     </div>
                   </div>
 
                   {filteredProgrammes.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-bold text-slate-400">
-                      No {filterLabel.toLowerCase()} programmes found.
+                      No programmes match the selected filters.
                     </div>
                   ) : (
                     <>
                       <div>
                         <label className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                          Search & Add {filterLabel === "All" ? "" : filterLabel}{" "}
-                          Programme
+                          Search & Add Programme
                         </label>
 
                         <SearchableProgrammeSelect
@@ -1083,23 +1172,23 @@ function JudgeModal({
                           clearQueryOnSelect={false}
                           placeholder={
                             availableProgrammes.length === 0
-                              ? `All ${filterLabel.toLowerCase()} programmes assigned`
-                              : `Search ${filterLabel.toLowerCase()} programme to assign...`
+                              ? "All matching programmes assigned"
+                              : "Search filtered programme to assign..."
                           }
-                          emptyText={`No unassigned ${filterLabel.toLowerCase()} programmes found`}
+                          emptyText="No unassigned programmes match the selected filters"
                         />
                       </div>
 
                       <div className="flex flex-col gap-3 rounded-2xl bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm font-black text-slate-700">
-                            {filterLabel}: {filteredSelectedProgrammes.length} /{" "}
+                            Filtered: {filteredSelectedProgrammes.length} /{" "}
                             {filteredProgrammes.length} selected
                           </p>
-                          {programmeFilter !== "all" && (
+                          {hasProgrammeFilters && (
                             <p className="mt-1 text-xs font-bold text-slate-500">
-                              Overall: {selectedProgrammes.length} /{" "}
-                              {programmes.length} selected
+                              Overall: {selectedProgrammes.length} / {programmes.length}{" "}
+                              selected
                             </p>
                           )}
                         </div>
@@ -1112,7 +1201,7 @@ function JudgeModal({
                               onClick={selectAllProgrammes}
                               className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-700 transition hover:bg-violet-50"
                             >
-                              Select All {filterLabel === "All" ? "" : filterLabel}
+                              Select All Matching
                             </button>
                           )}
 
@@ -1122,7 +1211,7 @@ function JudgeModal({
                               onClick={clearProgrammes}
                               className="rounded-xl border border-red-100 bg-white px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-50"
                             >
-                              Clear {filterLabel}
+                              Clear Matching
                             </button>
                           )}
                         </div>
@@ -1130,7 +1219,7 @@ function JudgeModal({
 
                       {filteredSelectedProgrammes.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-bold text-slate-400">
-                          No {filterLabel.toLowerCase()} programmes assigned yet.
+                          No programmes from the current filter are assigned yet.
                         </div>
                       ) : (
                         <div className="max-h-72 overflow-y-auto rounded-2xl border border-slate-200">
@@ -1146,7 +1235,10 @@ function JudgeModal({
                                   </p>
                                   <p className="mt-1 text-xs font-bold capitalize text-slate-500">
                                     {getCategoryName(programme.category_id)} •{" "}
-                                    {programme.stage_type === "off_stage"
+                                    {programme.programme_type === "group"
+                                      ? "Group"
+                                      : "Individual"}{" "}
+                                    • {normalizeStage(programme.stage_type) === "off_stage"
                                       ? "Off-stage"
                                       : "Stage"}
                                   </p>
