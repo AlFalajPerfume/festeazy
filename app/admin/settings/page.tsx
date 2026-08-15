@@ -947,7 +947,7 @@ export default function AdminSettingsPage() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                          Public Portal URL
+                          Main Event Page URL
                         </p>
                         <p className="mt-1 break-all text-sm font-black text-slate-800">
                           {publicUrl || "Add a public slug"}
@@ -1097,8 +1097,8 @@ export default function AdminSettingsPage() {
             >
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <ToggleCard
-                  title="Public Portal"
-                  description="Allow visitors to open this event page."
+                  title="Main Event Page"
+                  description="Control only /event/[slug]. Student Lookup and Live Results can still work from their direct links."
                   checked={isPublic}
                   onChange={setIsPublic}
                 />

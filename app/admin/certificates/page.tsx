@@ -112,6 +112,7 @@ type CertificateSettings = {
   font_family: string;
   preview_template_url: string | null;
   preview_template_path: string | null;
+  public_positions: number[];
 };
 
 type IssuedCertificate = {
@@ -171,6 +172,7 @@ const DEFAULT_SETTINGS: CertificateSettings = {
   font_family: "Arial, Helvetica, sans-serif",
   preview_template_url: null,
   preview_template_path: null,
+  public_positions: [1, 2],
 };
 
 const MESSAGE_TOKENS = [
@@ -207,6 +209,17 @@ function escapeHtml(value: string) {
 function safeNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizePublicPositions(value: unknown) {
+  if (!Array.isArray(value)) return [1, 2];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 1 && item <= 3),
+    ),
+  ).sort((a, b) => a - b);
 }
 
 function formatDate(value: string | null | undefined) {
@@ -627,6 +640,9 @@ export default function CertificatesPage() {
           certificateResponse.settings?.preview_template_url || null,
         preview_template_path:
           certificateResponse.settings?.preview_template_path || null,
+        public_positions: normalizePublicPositions(
+          certificateResponse.settings?.public_positions,
+        ),
         text_x_mm: safeNumber(
           certificateResponse.settings?.text_x_mm,
           DEFAULT_SETTINGS.text_x_mm,
@@ -1396,11 +1412,10 @@ export default function CertificatesPage() {
           >
             <div>
               <h2 className="text-lg font-black text-slate-950">
-                Default Wording & Print Alignment
+                Certificate Settings
               </h2>
               <p className="mt-1 text-xs font-bold text-slate-500">
-                The certificate design is already printed. FestEazy prints only
-                the blue message inside the blank area.
+                Manage Student Lookup eligibility, certificate wording and print alignment. FestEazy still prints only the message on pre-printed certificates.
               </p>
             </div>
             <ChevronDown
@@ -1444,6 +1459,68 @@ export default function CertificatesPage() {
                     {token}
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">
+                      Student Lookup Certificate Eligibility
+                    </p>
+                    <p className="mt-1 max-w-2xl text-xs font-bold leading-5 text-slate-500">
+                      Students can download a certificate from the public Student Lookup only for the selected published positions. The default is First and Second place.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-emerald-700 ring-1 ring-emerald-200">
+                    {settings.public_positions.length} enabled
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {[
+                    { value: 1, label: "1st Place" },
+                    { value: 2, label: "2nd Place" },
+                    { value: 3, label: "3rd Place" },
+                  ].map((position) => {
+                    const checked = settings.public_positions.includes(position.value);
+                    return (
+                      <label
+                        key={position.value}
+                        className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm font-black transition ${
+                          checked
+                            ? "border-emerald-300 bg-white text-emerald-700 shadow-sm"
+                            : "border-slate-200 bg-white/70 text-slate-500"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) =>
+                            setSettings((current) => ({
+                              ...current,
+                              public_positions: event.target.checked
+                                ? Array.from(
+                                    new Set([
+                                      ...current.public_positions,
+                                      position.value,
+                                    ]),
+                                  ).sort((a, b) => a - b)
+                                : current.public_positions.filter(
+                                    (item) => item !== position.value,
+                                  ),
+                            }))
+                          }
+                          className="h-5 w-5 accent-emerald-600"
+                        />
+                        {position.label}
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <p className="mt-3 text-[11px] font-bold leading-5 text-slate-500">
+                  Leave all positions unchecked to disable public certificate downloads without affecting Admin certificate printing.
+                </p>
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

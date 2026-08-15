@@ -168,6 +168,7 @@ type ReportType =
   | "prize_distribution"
   | "team_wise"
   | "top_scorers"
+  | "encouragement_gift"
   | "result_summary";
 
 type ChestPaperFormat =
@@ -233,6 +234,18 @@ type TopScorerRow = {
   offStagePoints: number;
   totalPoints: number;
   resultCount: number;
+};
+
+type EncouragementGiftRow = {
+  student: Student;
+  chestNo: string;
+  studentName: string;
+  gender: string;
+  categoryName: string;
+  className: string;
+  divisionName: string;
+  teamName: string;
+  programmeCount: number;
 };
 
 const REPORT_TYPES: {
@@ -321,6 +334,13 @@ const REPORT_TYPES: {
     icon: "⭐",
   },
   {
+    id: "encouragement_gift",
+    title: "Encouragement Gift Report",
+    description:
+      "Unique participating students without any published 1st or 2nd prize",
+    icon: "🎀",
+  },
+  {
     id: "result_summary",
     title: "Result Summary",
     description: "Team points and result summary",
@@ -367,6 +387,7 @@ const REPORT_GROUPS: ReportGroup[] = [
     reportIds: [
       "winners_list",
       "prize_distribution",
+      "encouragement_gift",
       "top_scorers",
       "result_summary",
     ],
@@ -378,6 +399,7 @@ const LANDSCAPE_REPORTS: ReportType[] = [
   "chest_list",
   "winners_list",
   "prize_distribution",
+  "encouragement_gift",
   "team_wise",
   "top_scorers",
   "result_summary",
@@ -458,6 +480,7 @@ export default function ReportsPage() {
   const [teamFilter, setTeamFilter] = useState("all");
   const [stageLocationFilter, setStageLocationFilter] = useState("all");
   const [showParticipantDivision, setShowParticipantDivision] = useState(false);
+  const [showEncouragementDivision, setShowEncouragementDivision] = useState(false);
   const [showEntryFormDivision, setShowEntryFormDivision] = useState(false);
   const [showEntryFormChestNo, setShowEntryFormChestNo] = useState(false);
   const [showChestCardDivision, setShowChestCardDivision] = useState(false);
@@ -1215,6 +1238,165 @@ export default function ReportsPage() {
     teams,
     classes,
     categories,
+  ]);
+
+  const encouragementGiftRows = useMemo<EncouragementGiftRow[]>(() => {
+    const activeRegistrations = registrations.filter((registration) => {
+      const status = String(registration.status || "active").toLowerCase();
+      return (
+        Boolean(registration.student_id) &&
+        Boolean(registration.programme_id) &&
+        !["cancelled", "inactive", "deleted"].includes(status)
+      );
+    });
+
+    const winningStudentIds = new Set<string>();
+    const absentStudentProgrammeKeys = new Set<string>();
+
+    results
+      .filter((result) => result.is_published)
+      .forEach((result) => {
+        const registration = activeRegistrations.find(
+          (item) => item.id === result.registration_id,
+        );
+        const programme = getProgramme(result.programme_id);
+
+        if (!registration || !programme || !registration.programme_id) return;
+
+        const relatedRegistrations =
+          programme.programme_type === "group"
+            ? activeRegistrations.filter(
+                (item) =>
+                  item.programme_id === registration.programme_id &&
+                  item.team_id === registration.team_id &&
+                  String(item.group_name || "").trim().toLowerCase() ===
+                    String(registration.group_name || "").trim().toLowerCase(),
+              )
+            : [registration];
+
+        const grade = String(result.grade || "").trim().toLowerCase();
+        if (grade === "absent") {
+          relatedRegistrations.forEach((item) => {
+            if (!item.student_id || !item.programme_id) return;
+            absentStudentProgrammeKeys.add(
+              `${item.student_id}:${item.programme_id}`,
+            );
+          });
+          return;
+        }
+
+        if (result.position === 1 || result.position === 2) {
+          relatedRegistrations.forEach((item) => {
+            if (item.student_id) winningStudentIds.add(item.student_id);
+          });
+        }
+      });
+
+    const programmeIdsByStudent = new Map<string, Set<string>>();
+
+    activeRegistrations.forEach((registration) => {
+      if (!registration.student_id || !registration.programme_id) return;
+      if (
+        absentStudentProgrammeKeys.has(
+          `${registration.student_id}:${registration.programme_id}`,
+        )
+      ) {
+        return;
+      }
+
+      if (!programmeIdsByStudent.has(registration.student_id)) {
+        programmeIdsByStudent.set(registration.student_id, new Set());
+      }
+      programmeIdsByStudent
+        .get(registration.student_id)!
+        .add(registration.programme_id);
+    });
+
+    const keyword = search.trim().toLowerCase();
+
+    return students
+      .filter((student) => {
+        if (String(student.status || "").toLowerCase() === "inactive") {
+          return false;
+        }
+        if (winningStudentIds.has(student.id)) return false;
+
+        const participatingProgrammeIds = programmeIdsByStudent.get(student.id);
+        if (!participatingProgrammeIds || participatingProgrammeIds.size === 0) {
+          return false;
+        }
+
+        const matchesCategory =
+          categoryFilter === "all" ||
+          (categoryFilter === "general"
+            ? !student.category_id
+            : student.category_id === categoryFilter);
+        const matchesClass =
+          classFilter === "all" || student.class_id === classFilter;
+        const matchesGender =
+          genderFilter === "all" ||
+          normalizeGender(student.gender) === genderFilter;
+        const matchesTeam =
+          teamFilter === "all" || student.team_id === teamFilter;
+        const matchesProgramme =
+          programmeFilter === "all" ||
+          participatingProgrammeIds.has(programmeFilter);
+
+        const searchableText = [
+          student.name,
+          cleanChest(student.chest_no),
+          student.admission_no || "",
+          getCategoryName(student.category_id),
+          getClassName(student.class_id),
+          getDivisionName(student.division_id),
+          getTeamName(student.team_id),
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        const matchesSearch = !keyword || searchableText.includes(keyword);
+
+        return (
+          matchesCategory &&
+          matchesClass &&
+          matchesGender &&
+          matchesTeam &&
+          matchesProgramme &&
+          matchesSearch
+        );
+      })
+      .map((student) => ({
+        student,
+        chestNo: cleanChest(student.chest_no),
+        studentName: student.name,
+        gender: student.gender,
+        categoryName: getCategoryName(student.category_id),
+        className: getClassName(student.class_id),
+        divisionName: getDivisionName(student.division_id),
+        teamName: getTeamName(student.team_id),
+        programmeCount: programmeIdsByStudent.get(student.id)?.size || 0,
+      }))
+      .sort((a, b) => {
+        const chestCompare =
+          chestNumber(a.chestNo) - chestNumber(b.chestNo);
+        if (chestCompare !== 0) return chestCompare;
+        return a.studentName.localeCompare(b.studentName);
+      });
+  }, [
+    registrations,
+    results,
+    students,
+    programmes,
+    categories,
+    classes,
+    divisions,
+    teams,
+    search,
+    categoryFilter,
+    classFilter,
+    genderFilter,
+    teamFilter,
+    programmeFilter,
   ]);
 
   const resultRows = useMemo(() => {
@@ -2404,6 +2586,29 @@ export default function ReportsPage() {
       });
     }
 
+    if (reportType === "encouragement_gift") {
+      return encouragementGiftRows.map((row, index) => {
+        const csvRow: Record<string, string | number> = {
+          No: index + 1,
+          Chest: row.chestNo,
+          Student: row.studentName,
+          Gender: formatGenderScope(row.gender),
+          Category: row.categoryName,
+          Class: row.className,
+        };
+
+        if (showEncouragementDivision) {
+          csvRow.Division = row.divisionName;
+        }
+
+        csvRow.Team = row.teamName;
+        csvRow["Programme Count"] = row.programmeCount;
+        csvRow["Gift Given"] = "";
+        csvRow.Signature = "";
+        return csvRow;
+      });
+    }
+
     if (reportType === "green_room" || reportType === "call_list") {
       const exportEntries =
         reportType === "green_room"
@@ -2600,6 +2805,10 @@ export default function ReportsPage() {
       return topScorerRows.length;
     }
 
+    if (reportType === "encouragement_gift") {
+      return encouragementGiftRows.length;
+    }
+
     return resultRows.length;
   })();
 
@@ -2610,6 +2819,7 @@ export default function ReportsPage() {
     if (reportType === "programme_register") return "programmes";
     if (reportType === "participant_list") return "students";
     if (reportType === "top_scorers") return "scorers";
+    if (reportType === "encouragement_gift") return "students";
     if (
       reportType === "winners_list" ||
       reportType === "prize_distribution" ||
@@ -2665,7 +2875,8 @@ export default function ReportsPage() {
     reportType === "chest_cards" ||
     reportType === "chest_list" ||
     reportType === "team_wise" ||
-    reportType === "top_scorers"
+    reportType === "top_scorers" ||
+    reportType === "encouragement_gift"
       ? "Search student, chest number, admission number or team..."
       : reportType === "programme_register"
         ? "Search programme or category..."
@@ -3760,6 +3971,33 @@ export default function ReportsPage() {
                     </div>
                   )}
 
+                  {reportType === "encouragement_gift" && (
+                    <div className="md:col-span-2 xl:col-span-3">
+                      <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-slate-950">
+                            Encouragement Gift Report Options
+                          </p>
+                          <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                            Each student appears only once. Anyone with a published First or Second place in any programme is excluded completely. Third-place students remain eligible.
+                          </p>
+                        </div>
+
+                        <label className="inline-flex cursor-pointer items-center gap-3 rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-black text-amber-700 shadow-sm">
+                          <input
+                            type="checkbox"
+                            checked={showEncouragementDivision}
+                            onChange={(event) =>
+                              setShowEncouragementDivision(event.target.checked)
+                            }
+                            className="h-5 w-5 accent-amber-600"
+                          />
+                          Show Division column
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {reportType === "participant_list" && (
                     <div className="md:col-span-2 xl:col-span-3">
                       <div className="flex flex-col gap-3 rounded-2xl border border-violet-200 bg-violet-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -4196,6 +4434,8 @@ export default function ReportsPage() {
                       participantEntries={participantEntries}
                       studentProgrammeRows={studentProgrammeRows}
                       showParticipantDivision={showParticipantDivision}
+                      encouragementGiftRows={encouragementGiftRows}
+                      showEncouragementDivision={showEncouragementDivision}
                       showChestCardDivision={showChestCardDivision}
                       resultRows={resultRows}
                       teamPoints={teamPoints}
@@ -5046,6 +5286,8 @@ function ReportBody(props: any) {
     participantEntries,
     studentProgrammeRows,
     showParticipantDivision,
+    encouragementGiftRows,
+    showEncouragementDivision,
     showChestCardDivision,
     resultRows,
     teamPoints,
@@ -5225,6 +5467,40 @@ function ReportBody(props: any) {
           rows={studentProgrammeRows}
           compactMode={compactMode}
           showDivision={showParticipantDivision}
+        />
+      )}
+
+      {reportType === "encouragement_gift" && (
+        <ReportTable
+          compactMode={compactMode}
+          headers={[
+            "SL",
+            "Chest No",
+            "Student Name",
+            "Gender",
+            "Category",
+            "Class",
+            ...(showEncouragementDivision ? ["Division"] : []),
+            "Team",
+            "Programmes",
+            "Gift Given",
+            "Signature",
+          ]}
+          rows={encouragementGiftRows.map(
+            (row: EncouragementGiftRow, index: number) => [
+              index + 1,
+              row.chestNo,
+              row.studentName,
+              formatGenderScope(row.gender),
+              row.categoryName,
+              row.className,
+              ...(showEncouragementDivision ? [row.divisionName || "-"] : []),
+              row.teamName,
+              row.programmeCount,
+              "☐",
+              "",
+            ],
+          )}
         />
       )}
 

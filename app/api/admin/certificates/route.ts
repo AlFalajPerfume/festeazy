@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   font_family: "Arial, Helvetica, sans-serif",
   preview_template_url: null,
   preview_template_path: null,
+  public_positions: [1, 2],
 };
 
 function safeNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -39,6 +40,20 @@ function cleanText(value: unknown, maxLength = 10000) {
 function cleanNullableText(value: unknown, maxLength = 2000) {
   const cleaned = cleanText(value, maxLength);
   return cleaned || null;
+}
+
+
+function cleanPublicPositions(value: unknown) {
+  if (value === undefined || value === null) return [1, 2];
+  if (!Array.isArray(value)) return [1, 2];
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 1 && item <= 3),
+    ),
+  ).sort((a, b) => a - b);
 }
 
 function formatCertificateYear(value: string | null | undefined) {
@@ -132,6 +147,7 @@ export async function PUT(request: NextRequest) {
       body.preview_template_path,
       1500,
     ),
+    public_positions: cleanPublicPositions(body.public_positions),
     updated_at: new Date().toISOString(),
   };
 

@@ -1,9 +1,7 @@
 /* eslint-disable */
 "use client";
 
-import { supabase } from "@/lib/supabase";
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -21,7 +19,6 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   useEffect,
@@ -181,7 +178,7 @@ const DEFAULT_SETTINGS: EventSettings = {
   show_points: true,
 };
 
-const REFRESH_INTERVAL_MS = 8000;
+const REFRESH_INTERVAL_MS = 10000;
 const ROTATE_INTERVAL_MS = 10000;
 const MAX_RESULT_SLIDES = 6;
 const TRANSITION_MS = 380;
@@ -330,20 +327,6 @@ function formatPublishedTime(value: string | null | undefined) {
   });
 }
 
-function timeAgo(value: string | null | undefined) {
-  if (!value) return "Published";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Published";
-
-  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
-  return formatDate(value);
-}
-
 function cleanParticipantName(value: string | null | undefined) {
   return String(value || "-").replace(/^#?\d+\s*/, "").trim() || "-";
 }
@@ -365,6 +348,25 @@ function getPositionText(position: number | null) {
   if (position === 2) return "Second Place";
   if (position === 3) return "Third Place";
   return position ? `Rank ${position}` : "Winner";
+}
+
+function buildResultSignature(results: ResultItem[]) {
+  return results
+    .map((result) =>
+      [
+        result.id,
+        result.programme_id || "",
+        result.registration_id || "",
+        result.position ?? "",
+        result.points ?? "",
+        result.total_mark ?? "",
+        result.average_mark ?? "",
+        result.grade || "",
+        result.published_at || "",
+      ].join(":"),
+    )
+    .sort()
+    .join("|");
 }
 
 export default function LiveResultsPage() {
@@ -403,15 +405,21 @@ export default function LiveResultsPage() {
   const fetchInFlight = useRef(false);
   const latestGroupSignature = useRef("");
   const transitionTimer = useRef<number | null>(null);
+  const liveEventRef = useRef<EventInfo | null>(null);
+  const liveProgrammesRef = useRef<Programme[]>([]);
+  const resultSignatureRef = useRef("");
 
   const theme = getThemeStyle(eventSettings.theme_color);
   const showPoints = eventSettings.show_points !== false;
+  const studentLookupUrl = slug
+    ? `https://festeazy.com/event/${encodeURIComponent(slug)}/student`
+    : "";
 
   useEffect(() => {
-    loadPublicData(true);
+    void loadPublicData();
 
     const refreshTimer = window.setInterval(() => {
-      loadPublicData(false);
+      void refreshLiveResults();
     }, REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(refreshTimer);
@@ -711,170 +719,108 @@ export default function LiveResultsPage() {
     }
   }, [resultGroups]);
 
-  async function loadPublicData(initial: boolean) {
+  async function requestLiveData(mode: "bootstrap" | "results" | "participants") {
+    const response = await fetch(
+      `/api/public/event/${encodeURIComponent(slug)}/live?mode=${mode}`,
+      { cache: "no-store" },
+    );
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || "Unable to load Live Results.");
+    }
+
+    return payload;
+  }
+
+  async function loadPublicData() {
     if (!slug || fetchInFlight.current) return;
 
     fetchInFlight.current = true;
-
-    if (initial) {
-      setIsLoading(true);
-      setLoadingError("");
-    } else {
-      setIsRefreshing(true);
-    }
+    setIsLoading(true);
+    setLoadingError("");
 
     try {
-      const { data: eventData, error: eventError } = await supabase
-        .from("events")
-        .select(
-          "id, organization_id, title, tagline, venue, start_date, end_date, public_slug, is_public",
-        )
-        .eq("public_slug", slug)
-        .eq("is_public", true)
-        .limit(1)
-        .maybeSingle();
+      const payload = await requestLiveData("bootstrap");
+      const activeEvent = payload.event as EventInfo | undefined;
+      const activeOrganization = payload.organization as Organization | undefined;
+      const loadedProgrammes = (payload.programmes || []) as Programme[];
+      const loadedResults = (payload.results || []) as ResultItem[];
 
-      if (eventError) throw eventError;
-      if (!eventData) throw new Error("This public event is not available.");
-
-      const activeEvent = eventData as EventInfo;
-
-      const { data: orgData, error: orgError } = await supabase
-        .from("organizations")
-        .select("id, name, slug, place, logo_url, status, plan_start, plan_end")
-        .eq("id", activeEvent.organization_id)
-        .limit(1)
-        .maybeSingle();
-
-      if (orgError) throw orgError;
-      if (!orgData) throw new Error("Madrasa not found.");
-
-      const activeOrganization = orgData as Organization;
-      const organizationStatus = String(activeOrganization.status || "active")
-        .trim()
-        .toLowerCase();
-
-      if (organizationStatus === "inactive" || organizationStatus === "disabled") {
-        throw new Error("This madrasa public portal is currently inactive.");
+      if (!activeEvent || !activeOrganization) {
+        throw new Error("This event is not available.");
       }
 
-      if (isPlanExpired(activeOrganization.plan_end)) {
-        throw new Error("This madrasa public portal plan has expired.");
-      }
-
-      const [
-        programmeRes,
-        categoryRes,
-        teamRes,
-        classRes,
-        studentRes,
-        registrationRes,
-        resultRes,
-        settingsRes,
-      ] = await Promise.all([
-        supabase
-          .from("programmes")
-          .select(
-            "id, organization_id, event_id, name, programme_type, stage_type, category_id, gender_scope, sort_order, status",
-          )
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .eq("status", "active")
-          .order("sort_order", { ascending: true }),
-
-        supabase
-          .from("categories")
-          .select("id, name")
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .order("sort_order", { ascending: true }),
-
-        supabase
-          .from("teams")
-          .select("id, name, code, color, logo_url")
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .order("sort_order", { ascending: true }),
-
-        supabase
-          .from("classes")
-          .select("id, name")
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .order("sort_order", { ascending: true }),
-
-        supabase
-          .from("students")
-          .select("id, chest_no, name, class_id, category_id, team_id")
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id),
-
-        supabase
-          .from("programme_registrations")
-          .select(
-            "id, organization_id, event_id, programme_id, student_id, team_id, group_name, registration_no, status, created_at",
-          )
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id),
-
-        supabase
-          .from("results")
-          .select(
-            "id, organization_id, event_id, programme_id, registration_id, total_mark, average_mark, grade, position, points, is_published, published_at, created_at",
-          )
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .eq("is_published", true),
-
-        supabase
-          .from("event_settings")
-          .select("organization_id, event_id, theme_color, show_points")
-          .eq("organization_id", activeEvent.organization_id)
-          .eq("event_id", activeEvent.id)
-          .maybeSingle(),
-      ]);
-
-      const firstError =
-        programmeRes.error ||
-        categoryRes.error ||
-        teamRes.error ||
-        classRes.error ||
-        studentRes.error ||
-        registrationRes.error ||
-        resultRes.error;
-
-      if (firstError) throw firstError;
+      liveEventRef.current = activeEvent;
+      liveProgrammesRef.current = loadedProgrammes;
+      resultSignatureRef.current = buildResultSignature(loadedResults);
 
       setOrganization(activeOrganization);
       setEventInfo(activeEvent);
-      setProgrammes((programmeRes.data || []) as Programme[]);
-      setCategories((categoryRes.data || []) as Category[]);
-      setTeams((teamRes.data || []) as Team[]);
-      setClasses((classRes.data || []) as ClassItem[]);
-      setStudents((studentRes.data || []) as Student[]);
-      setRegistrations((registrationRes.data || []) as Registration[]);
-      setResults((resultRes.data || []) as ResultItem[]);
+      setProgrammes(loadedProgrammes);
+      setCategories((payload.categories || []) as Category[]);
+      setTeams((payload.teams || []) as Team[]);
+      setClasses((payload.classes || []) as ClassItem[]);
+      setStudents((payload.students || []) as Student[]);
+      setRegistrations((payload.registrations || []) as Registration[]);
+      setResults(loadedResults);
 
       setEventSettings({
         ...DEFAULT_SETTINGS,
         organization_id: activeEvent.organization_id,
         event_id: activeEvent.id,
-        ...((settingsRes.data || {}) as Partial<EventSettings>),
+        ...((payload.settings || {}) as Partial<EventSettings>),
       });
 
       setIsOnline(true);
       setLoadingError("");
       setLastUpdated(new Date());
     } catch (error: any) {
-      console.error("Live TV refresh failed:", error);
+      console.error("Live TV initial load failed:", error);
       setIsOnline(false);
-
-      if (initial || !eventInfo) {
-        setLoadingError(error?.message || "Unable to open Live TV Results.");
-      }
+      setLoadingError(error?.message || "Unable to open Live TV Results.");
     } finally {
       fetchInFlight.current = false;
       setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }
+
+  async function refreshLiveResults() {
+    if (!liveEventRef.current || fetchInFlight.current) return;
+
+    fetchInFlight.current = true;
+    setIsRefreshing(true);
+
+    try {
+      // Every 10 seconds only the published result rows are requested.
+      // Static programmes, teams, classes and event information are not reloaded.
+      const resultPayload = await requestLiveData("results");
+      const nextResults = (resultPayload.results || []) as ResultItem[];
+      const nextSignature = buildResultSignature(nextResults);
+
+      if (nextSignature !== resultSignatureRef.current) {
+        // Participant details are refreshed only when the published result set
+        // actually changes, so new group members/names can render correctly.
+        const participantPayload = await requestLiveData("participants");
+        const changedResults = (participantPayload.results || []) as ResultItem[];
+
+        setStudents((participantPayload.students || []) as Student[]);
+        setRegistrations(
+          (participantPayload.registrations || []) as Registration[],
+        );
+        setResults(changedResults);
+        resultSignatureRef.current = buildResultSignature(changedResults);
+      }
+
+      setIsOnline(true);
+      setLoadingError("");
+      setLastUpdated(new Date());
+    } catch (error: any) {
+      console.error("Live TV result refresh failed:", error);
+      setIsOnline(false);
+    } finally {
+      fetchInFlight.current = false;
       setIsRefreshing(false);
     }
   }
@@ -906,13 +852,6 @@ export default function LiveResultsPage() {
           <p className="mt-3 text-sm font-bold leading-6 text-slate-300">
             {loadingError || "This public event is not available."}
           </p>
-          <Link
-            href={`/event/${slug}`}
-            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
-          >
-            <ArrowLeft size={17} />
-            Event Page
-          </Link>
         </div>
       </main>
     );
@@ -941,6 +880,12 @@ export default function LiveResultsPage() {
     : slideDirection === "next"
       ? "live-scene-enter-next"
       : "live-scene-enter-prev";
+
+  const studentLookupQrUrl = studentLookupUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=${encodeURIComponent(
+        studentLookupUrl,
+      )}`
+    : "";
 
   return (
     <main
@@ -1163,10 +1108,6 @@ export default function LiveResultsPage() {
         <footer className="shrink-0 px-5 pb-4 sm:px-8 lg:px-12">
           <div className="mx-auto flex max-w-[1880px] items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 backdrop-blur-xl sm:px-5">
             <div className="flex min-w-0 items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/35 sm:text-xs">
-              <Link href={`/event/${slug}`} className="hidden items-center gap-2 transition hover:text-white/70 sm:flex">
-                <ArrowLeft size={14} /> Event Page
-              </Link>
-              {eventDate && <span className="hidden h-1 w-1 rounded-full bg-white/20 sm:block" />}
               {eventDate && <span className="hidden md:block">{eventDate}</span>}
               {eventInfo.venue && <span className="hidden h-1 w-1 rounded-full bg-white/20 lg:block" />}
               {eventInfo.venue && (
@@ -1212,22 +1153,60 @@ export default function LiveResultsPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/35 sm:text-xs">
-              <button
-                type="button"
-                onClick={() => loadPublicData(false)}
-                disabled={isRefreshing}
-                className="hidden items-center gap-2 transition hover:text-white/70 sm:flex"
-              >
-                <RefreshCcw className={isRefreshing ? "animate-spin" : ""} size={13} />
-                {lastUpdated
-                  ? lastUpdated.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-                  : "Sync"}
-              </button>
-              <span className="hidden h-1 w-1 rounded-full bg-white/20 sm:block" />
-              <span className="flex items-center gap-2">
-                <Radio size={13} className="text-[var(--live-bright)]" /> FestEazy
-              </span>
+            <div className="flex items-center gap-3">
+              <div className="hidden items-center gap-3 xl:flex">
+                <div className="text-right">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
+                    Student Lookup
+                  </p>
+                  <p className="mt-1 text-[10px] font-black uppercase tracking-[0.08em] text-white/60">
+                    Scan to find programmes
+                  </p>
+                </div>
+
+                {studentLookupQrUrl && (
+                  <a
+                    href={studentLookupUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex h-[70px] w-[70px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)] transition hover:scale-[1.03]"
+                    title="Open Student Lookup"
+                  >
+                    <img
+                      src={studentLookupQrUrl}
+                      alt="QR code for Student Lookup"
+                      className="h-full w-full object-contain"
+                    />
+                  </a>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/35 sm:text-xs">
+                <button
+                  type="button"
+                  onClick={() => void refreshLiveResults()}
+                  disabled={isRefreshing}
+                  className="hidden items-center gap-2 transition hover:text-white/70 sm:flex"
+                  title="Refresh now"
+                >
+                  <RefreshCcw className={isRefreshing ? "animate-spin" : ""} size={13} />
+                  <span>
+                    Updated {lastUpdated
+                      ? lastUpdated.toLocaleTimeString("en-IN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })
+                      : "—"}
+                  </span>
+                </button>
+                <span className="hidden h-1 w-1 rounded-full bg-white/20 sm:block" />
+                <span className="hidden text-white/30 lg:inline">Auto 10s</span>
+                <span className="hidden h-1 w-1 rounded-full bg-white/20 lg:block" />
+                <span className="flex items-center gap-2">
+                  <Radio size={13} className="text-[var(--live-bright)]" /> FestEazy
+                </span>
+              </div>
             </div>
           </div>
         </footer>
@@ -1271,10 +1250,10 @@ function ResultScene({
           <div className="flex flex-wrap items-center gap-2.5">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.065] px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
               <Radio size={14} className={latest ? "text-[var(--live-bright)]" : "text-white/45"} />
-              {latest ? "Just Published" : "Result Highlight"}
+              {latest ? "Latest Result" : "Result Highlight"}
             </span>
             <span className="rounded-full border border-white/10 bg-white/[0.045] px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/45">
-              {getCategoryName(group.programme.category_id)} • {normalizeGender(group.programme.gender_scope)}
+              {getCategoryName(group.programme.category_id)}{normalizeGender(group.programme.gender_scope) === "All" ? "" : ` • ${normalizeGender(group.programme.gender_scope)}`}
             </span>
           </div>
 
@@ -1286,8 +1265,6 @@ function ResultScene({
             <span>{formatProgrammeType(group.programme.programme_type)}</span>
             <span className="h-1 w-1 rounded-full bg-white/25" />
             <span>{formatStageType(group.programme.stage_type)}</span>
-            <span className="h-1 w-1 rounded-full bg-white/25" />
-            <span>{timeAgo(group.publishedAt)}</span>
           </div>
         </div>
 
@@ -1423,7 +1400,7 @@ function StandingsScene({
           </div>
         </div>
       ) : (
-        <div className="relative z-10 mt-8 grid flex-1 gap-4 lg:grid-cols-2 lg:gap-5">
+        <div className="relative z-10 mt-8 grid flex-1 content-center auto-rows-max gap-4 lg:grid-cols-2 lg:gap-5">
           {top.map((team, index) => {
             const leaderPoints = Math.max(1, top[0]?.points || 1);
             const width = Math.max(5, Math.round((team.points / leaderPoints) * 100));
@@ -1520,7 +1497,7 @@ function ProgressScene({
             <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Latest Result</p>
             <p className="mt-2 truncate text-lg font-black uppercase tracking-[-0.025em] sm:text-xl">{latestGroup?.programme.name || "Waiting"}</p>
             {latestGroup && (
-              <p className="mt-1 text-xs font-bold text-white/35">{getCategoryName(latestGroup.programme.category_id)} • {timeAgo(latestGroup.publishedAt)}</p>
+              <p className="mt-1 text-xs font-bold text-white/35">{getCategoryName(latestGroup.programme.category_id)}</p>
             )}
           </div>
 

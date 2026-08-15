@@ -53,6 +53,72 @@ type ScheduleItem = {
   status: string | null;
 };
 
+const DEFAULT_CERTIFICATE_MESSAGE_TEMPLATE = `This Certificate of Merit is awarded to {student_name} of {organization_name} for securing {grade} Grade in {programme_name} in {event_title} held on {event_date} at {venue}.
+
+Category: {category_name}
+
+We wish {pronoun} all the best for a glorious future.`;
+
+const DEFAULT_PUBLIC_CERTIFICATE_SETTINGS = {
+  message_template: DEFAULT_CERTIFICATE_MESSAGE_TEMPLATE,
+  text_x_mm: 46,
+  text_y_mm: 73,
+  text_width_mm: 205,
+  font_size_pt: 11.5,
+  line_height: 1.55,
+  text_color: "#4f86a5",
+  text_align: "center",
+  font_family: "Arial, Helvetica, sans-serif",
+  preview_template_url: null as string | null,
+  public_positions: [1, 2] as number[],
+};
+
+function cleanPublicPositions(value: unknown) {
+  if (!Array.isArray(value)) return [1, 2];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 1 && item <= 3),
+    ),
+  ).sort((a, b) => a - b);
+}
+
+function certificatePositionLabel(position: number) {
+  if (position === 1) return "First Place";
+  if (position === 2) return "Second Place";
+  if (position === 3) return "Third Place";
+  return `Position ${position}`;
+}
+
+function certificateDateText(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+) {
+  const formatDate = (value: string | null | undefined) => {
+    if (!value) return "";
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  if (!startDate && !endDate) return "the event date";
+  if (!endDate || startDate === endDate) return formatDate(startDate || endDate);
+  if (!startDate) return formatDate(endDate);
+  return `${formatDate(startDate)} to ${formatDate(endDate)}`;
+}
+
+function certificatePronoun(value: unknown) {
+  const gender = canonicalGender(value);
+  if (gender === "female") return "her";
+  if (gender === "male") return "him";
+  return "them";
+}
+
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -133,9 +199,8 @@ function error(message: string, status = 400) {
 async function resolvePublicEvent(slug: string) {
   const { data: eventData, error: eventError } = await supabaseAdmin
     .from("events")
-    .select("id, organization_id, public_slug, is_public")
+    .select("id, organization_id, title, tagline, venue, start_date, end_date, public_slug, is_public")
     .eq("public_slug", slug)
-    .eq("is_public", true)
     .limit(1)
     .maybeSingle();
 
@@ -151,13 +216,13 @@ async function resolvePublicEvent(slug: string) {
     await Promise.all([
       supabaseAdmin
         .from("organizations")
-        .select("id, status, plan_end")
+        .select("id, name, slug, place, logo_url, status, plan_end")
         .eq("id", eventData.organization_id)
         .limit(1)
         .maybeSingle(),
       supabaseAdmin
         .from("event_settings")
-        .select("show_student_search")
+        .select("organization_id, event_id, theme_color, show_student_search")
         .eq("organization_id", eventData.organization_id)
         .eq("event_id", eventData.id)
         .maybeSingle(),
@@ -198,6 +263,34 @@ async function resolvePublicEvent(slug: string) {
     event: {
       id: String(eventData.id),
       organizationId: String(eventData.organization_id),
+      eventInfo: {
+        id: String(eventData.id),
+        organization_id: String(eventData.organization_id),
+        title: String(eventData.title || "Event"),
+        tagline: eventData.tagline ? String(eventData.tagline) : null,
+        venue: eventData.venue ? String(eventData.venue) : null,
+        start_date: eventData.start_date ? String(eventData.start_date) : null,
+        end_date: eventData.end_date ? String(eventData.end_date) : null,
+        public_slug: String(eventData.public_slug || slug),
+        is_public: Boolean(eventData.is_public),
+      },
+      organization: {
+        id: String(organizationData.id),
+        name: String(organizationData.name || "Organization"),
+        slug: organizationData.slug ? String(organizationData.slug) : null,
+        place: organizationData.place ? String(organizationData.place) : null,
+        logo_url: organizationData.logo_url ? String(organizationData.logo_url) : null,
+        status: organizationData.status ? String(organizationData.status) : null,
+        plan_end: organizationData.plan_end ? String(organizationData.plan_end) : null,
+      },
+      settings: {
+        organization_id: String(eventData.organization_id),
+        event_id: String(eventData.id),
+        theme_color: settingsRes.data?.theme_color
+          ? String(settingsRes.data.theme_color)
+          : "emerald",
+        show_student_search: settingsRes.data?.show_student_search !== false,
+      },
     },
   };
 }
@@ -246,6 +339,8 @@ async function loadStudentProgrammes(
   studentId: string,
   classId: string,
   gender: string,
+  publicEventInfo: any,
+  publicOrganization: any,
 ) {
   const { data: matchedStudent, error: studentError } = await supabaseAdmin
     .from("students")
@@ -486,6 +581,163 @@ async function loadStudentProgrammes(
     return a.name.localeCompare(b.name);
   });
 
+  const { data: certificateSettingsRow, error: certificateSettingsError } =
+    await supabaseAdmin
+      .from("certificate_print_settings")
+      .select(
+        "message_template, text_x_mm, text_y_mm, text_width_mm, font_size_pt, line_height, text_color, text_align, font_family, preview_template_url, public_positions",
+      )
+      .eq("organization_id", organizationId)
+      .eq("event_id", eventId)
+      .maybeSingle();
+
+  if (certificateSettingsError) {
+    throw new Error(certificateSettingsError.message);
+  }
+
+  const certificateSettings = {
+    ...DEFAULT_PUBLIC_CERTIFICATE_SETTINGS,
+    ...(certificateSettingsRow || {}),
+    public_positions: cleanPublicPositions(
+      certificateSettingsRow?.public_positions,
+    ),
+  };
+
+  const publicPositions = certificateSettings.public_positions;
+
+  const { data: publishedResultRows, error: publishedResultError } =
+    programmeIds.length > 0 && publicPositions.length > 0
+      ? await supabaseAdmin
+          .from("results")
+          .select(
+            "id, programme_id, registration_id, grade, position, total_mark, average_mark, is_published, published_at",
+          )
+          .eq("organization_id", organizationId)
+          .eq("event_id", eventId)
+          .eq("is_published", true)
+          .in("programme_id", programmeIds)
+      : { data: [] as any[], error: null as any };
+
+  if (publishedResultError) throw new Error(publishedResultError.message);
+
+  const eligibleResults = (publishedResultRows || []).filter((result: any) => {
+    const position = Number(result.position || 0);
+    const grade = normalize(result.grade || "");
+    return publicPositions.includes(position) && grade !== "absent";
+  });
+
+  const resultRegistrationIds = Array.from(
+    new Set(
+      eligibleResults
+        .map((result: any) => clean(result.registration_id))
+        .filter(Boolean),
+    ),
+  );
+
+  const { data: resultRegistrationRows, error: resultRegistrationError } =
+    resultRegistrationIds.length > 0
+      ? await supabaseAdmin
+          .from("programme_registrations")
+          .select("id, programme_id, student_id, team_id, group_name, status")
+          .eq("organization_id", organizationId)
+          .eq("event_id", eventId)
+          .in("id", resultRegistrationIds)
+      : { data: [] as any[], error: null as any };
+
+  if (resultRegistrationError) throw new Error(resultRegistrationError.message);
+
+  const resultRegistrationMap = new Map(
+    (resultRegistrationRows || []).map((row: any) => [String(row.id), row]),
+  );
+
+  const certificates = eligibleResults
+    .map((result: any) => {
+      const programme = programmeMap.get(String(result.programme_id || ""));
+      if (!programme) return null;
+
+      const resultRegistration = resultRegistrationMap.get(
+        String(result.registration_id || ""),
+      ) as any;
+      if (!resultRegistration) return null;
+
+      const matchingStudentRegistration = registrations.find((registration) => {
+        if (registration.programme_id !== programme.id) return false;
+
+        if (programme.programme_type === "group") {
+          return (
+            registration.team_id === resultRegistration.team_id &&
+            normalize(registration.group_name) ===
+              normalize(resultRegistration.group_name)
+          );
+        }
+
+        return registration.id === resultRegistration.id;
+      });
+
+      if (!matchingStudentRegistration) return null;
+
+      const categoryName = programme.category_id
+        ? programmeCategoryMap.get(programme.category_id) || "General"
+        : "General";
+      const position = Number(result.position || 0);
+      const positionText = certificatePositionLabel(position);
+      const gradeText = clean(result.grade || "");
+
+      const replacements: Record<string, string> = {
+        "{student_name}": String(matchedStudent.name || "Student"),
+        "{organization_name}": String(publicOrganization?.name || "Organization"),
+        "{grade}": gradeText,
+        "{programme_name}": String(programme.name || "Programme"),
+        "{event_title}": String(publicEventInfo?.title || "Event"),
+        "{event_date}": certificateDateText(
+          publicEventInfo?.start_date,
+          publicEventInfo?.end_date,
+        ),
+        "{venue}": String(
+          publicEventInfo?.venue || publicOrganization?.place || "the event venue",
+        ),
+        "{category_name}": String(categoryName),
+        "{team_name}": String(teamRes.data?.name || ""),
+        "{group_name}": String(matchingStudentRegistration.group_name || ""),
+        "{position}": positionText,
+        "{pronoun}": certificatePronoun(matchedStudent.gender),
+      };
+
+      const messageText = Object.entries(replacements).reduce(
+        (text, [token, value]) => text.split(token).join(value),
+        String(
+          certificateSettings.message_template ||
+            DEFAULT_CERTIFICATE_MESSAGE_TEMPLATE,
+        ),
+      );
+
+      return {
+        id: `${result.id}:${matchedStudent.id}`,
+        resultId: String(result.id),
+        programmeId: programme.id,
+        programmeName: programme.name,
+        programmeType: programme.programme_type,
+        categoryName,
+        groupName: matchingStudentRegistration.group_name || null,
+        position,
+        positionLabel: positionText,
+        grade: gradeText,
+        publishedAt: result.published_at || null,
+        messageText,
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => {
+      if (a.position !== b.position) return a.position - b.position;
+      const firstProgramme = programmeMap.get(a.programmeId);
+      const secondProgramme = programmeMap.get(b.programmeId);
+      const order =
+        Number(firstProgramme?.sort_order || 9999) -
+        Number(secondProgramme?.sort_order || 9999);
+      if (order !== 0) return order;
+      return String(a.programmeName).localeCompare(String(b.programmeName));
+    });
+
   return NextResponse.json({
     success: true,
     student: {
@@ -500,6 +752,26 @@ async function loadStudentProgrammes(
       teamColor: teamRes.data?.color || null,
     },
     programmes: assignments,
+    certificates,
+    certificateSettings: {
+      templateUrl: certificateSettings.preview_template_url || null,
+      textXmm: Number(certificateSettings.text_x_mm || 46),
+      textYmm: Number(certificateSettings.text_y_mm || 73),
+      textWidthMm: Number(certificateSettings.text_width_mm || 205),
+      fontSizePt: Number(certificateSettings.font_size_pt || 11.5),
+      lineHeight: Number(certificateSettings.line_height || 1.55),
+      textColor: String(certificateSettings.text_color || "#4f86a5"),
+      textAlign: ["left", "center", "right"].includes(
+        String(certificateSettings.text_align || "center"),
+      )
+        ? String(certificateSettings.text_align)
+        : "center",
+      fontFamily: String(
+        certificateSettings.font_family ||
+          "Arial, Helvetica, sans-serif",
+      ),
+      eligiblePositions: publicPositions,
+    },
   });
 }
 
@@ -583,6 +855,11 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
+        context: {
+          event: resolved.event.eventInfo,
+          organization: resolved.event.organization,
+          settings: resolved.event.settings,
+        },
         classes,
       });
     }
@@ -706,6 +983,8 @@ export async function POST(
         studentId,
         classId,
         gender,
+        resolved.event.eventInfo,
+        resolved.event.organization,
       );
     }
 

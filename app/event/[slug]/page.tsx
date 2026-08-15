@@ -3,6 +3,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
+import { loadPublicResultParticipants } from "@/lib/public-result-participants";
 import {
   CalendarDays,
   Camera,
@@ -914,44 +915,62 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
     }
 
     const organizationStatus = String(activeOrganization.status || "active")
-  .trim()
-  .toLowerCase();
+      .trim()
+      .toLowerCase();
 
-if (organizationStatus === "inactive" || organizationStatus === "disabled") {
-  return stopLoading("This madrasa public portal is currently inactive.");
-}
+    if (organizationStatus === "inactive" || organizationStatus === "disabled") {
+      return stopLoading("This madrasa public portal is currently inactive.");
+    }
 
-if (isPlanExpired(activeOrganization.plan_end)) {
-  return stopLoading("This madrasa public portal plan has expired.");
-}
+    if (isPlanExpired(activeOrganization.plan_end)) {
+      return stopLoading("This madrasa public portal plan has expired.");
+    }
 
     setOrganization(activeOrganization);
 
-    let allStudents: Student[] = [];
-    let allRegistrations: Registration[] = [];
-    let allPublishedResults: ResultItem[] = [];
-
     try {
-      [allStudents, allRegistrations, allPublishedResults] = await Promise.all([
-        fetchAllRows<Student>((from, to) =>
-          supabase.from("students")
-            .select("id, chest_no, name, class_id, category_id, team_id")
-            .eq("organization_id", activeEvent.organization_id)
-            .eq("event_id", activeEvent.id)
-            .order("chest_no_sort", { ascending: true })
-            .range(from, to),
-        ),
-        fetchAllRows<Registration>((from, to) =>
-          supabase.from("programme_registrations")
-            .select("*")
-            .eq("organization_id", activeEvent.organization_id)
-            .eq("event_id", activeEvent.id)
-            .eq("status", "registered")
-            .order("created_at", { ascending: true })
-            .range(from, to),
-        ),
+      const [
+        programmeRes,
+        categoryRes,
+        teamRes,
+        classRes,
+        settingsRes,
+        allPublishedResults,
+      ] = await Promise.all([
+        supabase
+          .from("programmes")
+          .select("*")
+          .eq("event_id", activeEvent.id)
+          .eq("status", "active")
+          .order("sort_order", { ascending: true }),
+
+        supabase
+          .from("categories")
+          .select("id, name")
+          .eq("event_id", activeEvent.id)
+          .order("sort_order", { ascending: true }),
+
+        supabase
+          .from("teams")
+          .select("id, name, code, color, logo_url, leader_name, description")
+          .eq("event_id", activeEvent.id)
+          .order("sort_order", { ascending: true }),
+
+        supabase
+          .from("classes")
+          .select("id, name")
+          .eq("event_id", activeEvent.id)
+          .order("sort_order", { ascending: true }),
+
+        supabase
+          .from("event_settings")
+          .select("*")
+          .eq("event_id", activeEvent.id)
+          .maybeSingle(),
+
         fetchAllRows<ResultItem>((from, to) =>
-          supabase.from("results")
+          supabase
+            .from("results")
             .select("*")
             .eq("organization_id", activeEvent.organization_id)
             .eq("event_id", activeEvent.id)
@@ -960,160 +979,160 @@ if (isPlanExpired(activeOrganization.plan_end)) {
             .range(from, to),
         ),
       ]);
-    } catch (loadError) {
-      return stopLoading(loadError instanceof Error ? loadError.message : "Unable to load public event data.");
-    }
 
-    const [
-      programmeRes,
-      categoryRes,
-      teamRes,
-      classRes,
-      templateRes,
-      galleryRes,
-      settingsRes,
-      milestoneRes,
-      posterLockRes,
-    ] = await Promise.all([
-      supabase
-        .from("programmes")
-        .select("*")
-        .eq("event_id", activeEvent.id)
-        .eq("status", "active")
-        .order("sort_order", { ascending: true }),
+      if (programmeRes.error) throw new Error(programmeRes.error.message);
+      if (categoryRes.error) throw new Error(categoryRes.error.message);
+      if (teamRes.error) throw new Error(teamRes.error.message);
+      if (classRes.error) throw new Error(classRes.error.message);
 
-      supabase
-        .from("categories")
-        .select("id, name")
-        .eq("event_id", activeEvent.id)
-        .order("sort_order", { ascending: true }),
-
-      supabase
-        .from("teams")
-        .select("id, name, code, color, logo_url, leader_name, description")
-        .eq("event_id", activeEvent.id)
-        .order("sort_order", { ascending: true }),
-
-      supabase
-        .from("classes")
-        .select("id, name")
-        .eq("event_id", activeEvent.id)
-        .order("sort_order", { ascending: true }),
-
-      supabase
-        .from("poster_templates")
-        .select("*")
-        .eq("event_id", activeEvent.id)
-        .eq("template_usage", "result_poster")
-        .order("is_active", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(3),
-
-
-      supabase
-        .from("gallery_images")
-        .select("*")
-        .eq("event_id", activeEvent.id)
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: false }),
-
-      supabase
-        .from("event_settings")
-        .select("*")
-        .eq("event_id", activeEvent.id)
-        .maybeSingle(),
-
-      supabase
-        .from("result_milestone_posters")
-        .select("*")
-        .eq("event_id", activeEvent.id)
-        .eq("is_public", true)
-        .order("milestone_count", { ascending: false }),
-
-      supabase
-        .from("result_posters")
-        .select(
-          "id, organization_id, event_id, programme_id, template_id, result_no, poster_data, is_public, created_at",
-        )
-        .eq("event_id", activeEvent.id)
-        .eq("is_public", true),
-    ]);
-
-    if (programmeRes.error) return stopLoading(programmeRes.error.message);
-    if (categoryRes.error) return stopLoading(categoryRes.error.message);
-    if (teamRes.error) return stopLoading(teamRes.error.message);
-    if (classRes.error) return stopLoading(classRes.error.message);
-
-    if (templateRes.error) {
-      console.warn("Poster template loading skipped:", templateRes.error.message);
-      setPosterTemplates([]);
-      setSelectedPosterTemplateId("");
-    } else {
-      const loadedTemplates = ((templateRes.data || []) as PosterTemplate[])
-        .filter((template) => isUploadedCustomPosterTemplate(template))
-        .slice(0, 3);
-
-      setPosterTemplates(loadedTemplates);
-
-      const defaultTemplate =
-        loadedTemplates.find((template) => template.is_active) ||
-        loadedTemplates[0] ||
-        null;
-
-      setSelectedPosterTemplateId(defaultTemplate?.id || "");
-    }
-
-
-    if (galleryRes.error) {
-      console.warn("Gallery loading skipped:", galleryRes.error.message);
-      setGalleryImages([]);
-    } else {
-      setGalleryImages((galleryRes.data || []) as GalleryImage[]);
-    }
-
-    if (settingsRes.error) {
-      console.warn("Event settings loading skipped:", settingsRes.error.message);
-      setEventSettings({
+      const loadedProgrammes = (programmeRes.data || []) as Programme[];
+      const loadedSettings = {
         ...DEFAULT_SETTINGS,
         organization_id: activeEvent.organization_id,
         event_id: activeEvent.id,
-      });
-    } else {
-      setEventSettings({
-        ...DEFAULT_SETTINGS,
-        organization_id: activeEvent.organization_id,
-        event_id: activeEvent.id,
-        ...(settingsRes.data || {}),
-      } as EventSettings);
-    }
+        ...(settingsRes.error ? {} : settingsRes.data || {}),
+      } as EventSettings;
 
-    if (milestoneRes.error) {
-      console.warn("Milestone posters loading skipped:", milestoneRes.error.message);
-      setMilestonePosters([]);
-    } else {
-      setMilestonePosters((milestoneRes.data || []) as MilestonePoster[]);
-    }
+      if (settingsRes.error) {
+        console.warn(
+          "Event settings loading skipped:",
+          settingsRes.error.message,
+        );
+      }
 
-    if (posterLockRes.error) {
-      console.warn(
-        "Official result poster locks loading skipped:",
-        posterLockRes.error.message,
+      const publishedProgrammeIds = new Set(
+        allPublishedResults
+          .map((result) => result.programme_id)
+          .filter((value): value is string => Boolean(value)),
       );
-      setResultPosterLocks([]);
-    } else {
-      setResultPosterLocks((posterLockRes.data || []) as ResultPosterLock[]);
+
+      const groupProgrammeIds = loadedProgrammes
+        .filter(
+          (programme) =>
+            programme.programme_type === "group" &&
+            publishedProgrammeIds.has(programme.id),
+        )
+        .map((programme) => programme.id);
+
+      const participantData = await loadPublicResultParticipants({
+        supabase,
+        organizationId: activeEvent.organization_id,
+        eventId: activeEvent.id,
+        results: allPublishedResults,
+        groupProgrammeIds,
+      });
+
+      const shouldLoadPosters = loadedSettings.show_posters !== false;
+      const shouldLoadGallery = loadedSettings.show_gallery !== false;
+
+      const [templateRes, galleryRes, milestoneRes, posterLockRes] =
+        await Promise.all([
+          shouldLoadPosters
+            ? supabase
+                .from("poster_templates")
+                .select("*")
+                .eq("event_id", activeEvent.id)
+                .eq("template_usage", "result_poster")
+                .order("is_active", { ascending: false })
+                .order("created_at", { ascending: false })
+                .limit(3)
+            : Promise.resolve({ data: [], error: null }),
+
+          shouldLoadGallery
+            ? supabase
+                .from("gallery_images")
+                .select("*")
+                .eq("event_id", activeEvent.id)
+                .eq("is_active", true)
+                .order("sort_order", { ascending: true })
+                .order("created_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+
+          shouldLoadPosters
+            ? supabase
+                .from("result_milestone_posters")
+                .select("*")
+                .eq("event_id", activeEvent.id)
+                .eq("is_public", true)
+                .order("milestone_count", { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+
+          shouldLoadPosters
+            ? supabase
+                .from("result_posters")
+                .select(
+                  "id, organization_id, event_id, programme_id, template_id, result_no, poster_data, is_public, created_at",
+                )
+                .eq("event_id", activeEvent.id)
+                .eq("is_public", true)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+      if (templateRes.error) {
+        console.warn(
+          "Poster template loading skipped:",
+          templateRes.error.message,
+        );
+        setPosterTemplates([]);
+        setSelectedPosterTemplateId("");
+      } else {
+        const loadedTemplates = ((templateRes.data || []) as PosterTemplate[])
+          .filter((template) => isUploadedCustomPosterTemplate(template))
+          .slice(0, 3);
+
+        setPosterTemplates(loadedTemplates);
+
+        const defaultTemplate =
+          loadedTemplates.find((template) => template.is_active) ||
+          loadedTemplates[0] ||
+          null;
+
+        setSelectedPosterTemplateId(defaultTemplate?.id || "");
+      }
+
+      if (galleryRes.error) {
+        console.warn("Gallery loading skipped:", galleryRes.error.message);
+        setGalleryImages([]);
+      } else {
+        setGalleryImages((galleryRes.data || []) as GalleryImage[]);
+      }
+
+      if (milestoneRes.error) {
+        console.warn(
+          "Milestone posters loading skipped:",
+          milestoneRes.error.message,
+        );
+        setMilestonePosters([]);
+      } else {
+        setMilestonePosters((milestoneRes.data || []) as MilestonePoster[]);
+      }
+
+      if (posterLockRes.error) {
+        console.warn(
+          "Official result poster locks loading skipped:",
+          posterLockRes.error.message,
+        );
+        setResultPosterLocks([]);
+      } else {
+        setResultPosterLocks((posterLockRes.data || []) as ResultPosterLock[]);
+      }
+
+      setEventSettings(loadedSettings);
+      setProgrammes(loadedProgrammes);
+      setCategories((categoryRes.data || []) as Category[]);
+      setTeams((teamRes.data || []) as Team[]);
+      setClasses((classRes.data || []) as ClassItem[]);
+      setStudents(participantData.students as Student[]);
+      setRegistrations(participantData.registrations as Registration[]);
+      setResults(allPublishedResults);
+      setIsLoading(false);
+    } catch (loadError) {
+      return stopLoading(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load public event data.",
+      );
     }
-
-    setProgrammes((programmeRes.data || []) as Programme[]);
-    setCategories((categoryRes.data || []) as Category[]);
-    setTeams((teamRes.data || []) as Team[]);
-    setClasses((classRes.data || []) as ClassItem[]);
-    setStudents(allStudents);
-    setRegistrations(allRegistrations);
-    setResults(allPublishedResults);
-
-    setIsLoading(false);
   }
 
   function stopLoading(message: string) {

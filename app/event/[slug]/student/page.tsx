@@ -1,12 +1,12 @@
 /* eslint-disable */
 "use client";
 
-import { supabase } from "@/lib/supabase";
 import {
   ArrowLeft,
   BadgeCheck,
   CalendarDays,
   Clock,
+  Download,
   Loader2,
   MapPin,
   Printer,
@@ -90,10 +90,40 @@ type LookupProgramme = {
   schedule: LookupSchedule | null;
 };
 
+type LookupCertificate = {
+  id: string;
+  resultId: string;
+  programmeId: string;
+  programmeName: string;
+  programmeType: string;
+  categoryName: string;
+  groupName: string | null;
+  position: number;
+  positionLabel: string;
+  grade: string;
+  publishedAt: string | null;
+  messageText: string;
+};
+
+type CertificateDownloadSettings = {
+  templateUrl: string | null;
+  textXmm: number;
+  textYmm: number;
+  textWidthMm: number;
+  fontSizePt: number;
+  lineHeight: number;
+  textColor: string;
+  textAlign: "left" | "center" | "right";
+  fontFamily: string;
+  eligiblePositions: number[];
+};
+
 type LookupResponse = {
   success: true;
   student: LookupStudent;
   programmes: LookupProgramme[];
+  certificates: LookupCertificate[];
+  certificateSettings: CertificateDownloadSettings;
 };
 
 type NamedOption = {
@@ -127,6 +157,27 @@ const DEFAULT_SETTINGS: EventSettings = {
   theme_color: "emerald",
   show_student_search: true,
 };
+
+const DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS: CertificateDownloadSettings = {
+  templateUrl: null,
+  textXmm: 46,
+  textYmm: 73,
+  textWidthMm: 205,
+  fontSizePt: 11.5,
+  lineHeight: 1.55,
+  textColor: "#4f86a5",
+  textAlign: "center",
+  fontFamily: "Arial, Helvetica, sans-serif",
+  eligiblePositions: [1, 2],
+};
+
+function safeDownloadName(value: unknown) {
+  return String(value || "certificate")
+    .replace(/[^a-zA-Z0-9-_ ]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .toLowerCase();
+}
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -302,6 +353,10 @@ export default function ParentStudentProgrammeLookupPage() {
 
   const [student, setStudent] = useState<LookupStudent | null>(null);
   const [programmes, setProgrammes] = useState<LookupProgramme[]>([]);
+  const [certificates, setCertificates] = useState<LookupCertificate[]>([]);
+  const [certificateSettings, setCertificateSettings] =
+    useState<CertificateDownloadSettings>(DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS);
+  const [downloadingCertificateId, setDownloadingCertificateId] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
@@ -384,110 +439,43 @@ export default function ParentStudentProgrammeLookupPage() {
     return payload;
   }
 
-  async function loadLookupBootstrap() {
-    setLookupError("");
-
-    const payload = await lookupRequest({ action: "bootstrap" });
-    setClasses((payload?.classes || []) as NamedOption[]);
-  }
-
   async function loadPublicContext() {
     setIsLoading(true);
     setPageError("");
     setLookupError("");
 
-    const { data: eventData, error: eventError } = await supabase
-      .from("events")
-      .select(
-        "id, organization_id, title, tagline, venue, start_date, end_date, public_slug, is_public",
-      )
-      .eq("public_slug", slug)
-      .eq("is_public", true)
-      .limit(1)
-      .maybeSingle();
+    try {
+      const payload = await lookupRequest({ action: "bootstrap" });
+      const context = payload?.context || {};
+      const activeEvent = context.event as EventInfo | undefined;
+      const activeOrganization = context.organization as Organization | undefined;
 
-    if (eventError) {
-      setPageError(eventError.message);
-      setIsLoading(false);
-      return;
-    }
-
-    if (!eventData) {
-      setPageError("This public event is not available.");
-      setIsLoading(false);
-      return;
-    }
-
-    const activeEvent = eventData as EventInfo;
-
-    const [{ data: orgData, error: orgError }, settingsRes] = await Promise.all([
-      supabase
-        .from("organizations")
-        .select("id, name, slug, place, logo_url, status, plan_end")
-        .eq("id", activeEvent.organization_id)
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from("event_settings")
-        .select("organization_id, event_id, theme_color, show_student_search")
-        .eq("organization_id", activeEvent.organization_id)
-        .eq("event_id", activeEvent.id)
-        .maybeSingle(),
-    ]);
-
-    if (orgError) {
-      setPageError(orgError.message);
-      setIsLoading(false);
-      return;
-    }
-
-    const activeOrganization = (orgData || null) as Organization | null;
-
-    if (!activeOrganization) {
-      setPageError("Organization not found.");
-      setIsLoading(false);
-      return;
-    }
-
-    const organizationStatus = normalizeText(activeOrganization.status || "active");
-
-    if (["inactive", "disabled"].includes(organizationStatus)) {
-      setPageError("This public event is currently unavailable.");
-      setIsLoading(false);
-      return;
-    }
-
-    if (isPlanExpired(activeOrganization.plan_end)) {
-      setPageError("This public event is currently unavailable.");
-      setIsLoading(false);
-      return;
-    }
-
-    const activeSettings = {
-      ...DEFAULT_SETTINGS,
-      organization_id: activeEvent.organization_id,
-      event_id: activeEvent.id,
-      ...(settingsRes.error ? {} : settingsRes.data || {}),
-    } as EventSettings;
-
-    setOrganization(activeOrganization);
-    setEventInfo(activeEvent);
-    setEventSettings(activeSettings);
-
-    if (activeSettings.show_student_search !== false) {
-      try {
-        await loadLookupBootstrap();
-      } catch (error: any) {
-        setLookupError(error?.message || "Unable to load classes.");
+      if (!activeEvent || !activeOrganization) {
+        throw new Error("This student lookup is not available.");
       }
-    }
 
-    setIsLoading(false);
+      const activeSettings = {
+        ...DEFAULT_SETTINGS,
+        organization_id: activeEvent.organization_id,
+        event_id: activeEvent.id,
+        ...(context.settings || {}),
+      } as EventSettings;
+
+      setOrganization(activeOrganization);
+      setEventInfo(activeEvent);
+      setEventSettings(activeSettings);
+      setClasses((payload?.classes || []) as NamedOption[]);
+    } catch (error: any) {
+      setPageError(error?.message || "Unable to load the student lookup.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function clearResult() {
     setStudent(null);
     setProgrammes([]);
+    setCertificates([]);
     setMessage("");
     setHasSearched(false);
   }
@@ -547,6 +535,7 @@ export default function ParentStudentProgrammeLookupPage() {
     setMessage("");
     setStudent(null);
     setProgrammes([]);
+    setCertificates([]);
     setHasSearched(Boolean(studentId));
 
     if (!studentId || !selectedClassId || !selectedGender) {
@@ -565,6 +554,11 @@ export default function ParentStudentProgrammeLookupPage() {
 
       setStudent(payload.student);
       setProgrammes(payload.programmes || []);
+      setCertificates(payload.certificates || []);
+      setCertificateSettings({
+        ...DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS,
+        ...(payload.certificateSettings || {}),
+      });
       setMessage("Student programmes loaded.");
     } catch (error: any) {
       setLookupError(error?.message || "Unable to load this student's programmes.");
@@ -581,6 +575,7 @@ export default function ParentStudentProgrammeLookupPage() {
     setStudents([]);
     setStudent(null);
     setProgrammes([]);
+    setCertificates([]);
     setLookupError("");
     setMessage("");
     setHasSearched(false);
@@ -590,9 +585,167 @@ export default function ParentStudentProgrammeLookupPage() {
     setSelectedStudentId("");
     setStudent(null);
     setProgrammes([]);
+    setCertificates([]);
     setLookupError("");
     setMessage("");
     setHasSearched(false);
+  }
+
+  async function downloadCertificate(certificate: LookupCertificate) {
+    if (!student || !organization || !eventInfo) return;
+
+    setDownloadingCertificateId(certificate.id);
+    setLookupError("");
+
+    let certificateRoot: HTMLDivElement | null = null;
+
+    try {
+      const html2canvasModule = await import("html2canvas");
+      const html2canvas = (html2canvasModule as any).default || html2canvasModule;
+
+      const widthPx = 1123;
+      const heightPx = 794;
+      const pxPerMm = widthPx / 297;
+
+      const root = document.createElement("div");
+      certificateRoot = root;
+      root.style.position = "fixed";
+      root.style.left = "-12000px";
+      root.style.top = "0";
+      root.style.width = `${widthPx}px`;
+      root.style.height = `${heightPx}px`;
+      root.style.background = "#ffffff";
+      root.style.overflow = "hidden";
+      root.style.fontFamily = certificateSettings.fontFamily;
+      root.style.boxSizing = "border-box";
+
+      if (certificateSettings.templateUrl) {
+        const image = document.createElement("img");
+        image.src = certificateSettings.templateUrl;
+        image.crossOrigin = "anonymous";
+        image.alt = "Certificate template";
+        image.style.position = "absolute";
+        image.style.inset = "0";
+        image.style.width = "100%";
+        image.style.height = "100%";
+        image.style.objectFit = "fill";
+        root.appendChild(image);
+
+        await new Promise<void>((resolve) => {
+          if (image.complete) return resolve();
+          const finish = () => resolve();
+          image.addEventListener("load", finish, { once: true });
+          image.addEventListener("error", finish, { once: true });
+        });
+      } else {
+        const border = document.createElement("div");
+        border.style.position = "absolute";
+        border.style.inset = "34px";
+        border.style.border = `5px solid ${theme.primary}`;
+        border.style.borderRadius = "28px";
+        border.style.boxShadow = `inset 0 0 0 2px ${theme.border}`;
+        root.appendChild(border);
+
+        const brand = document.createElement("div");
+        brand.innerText = organization.name;
+        brand.style.position = "absolute";
+        brand.style.left = "80px";
+        brand.style.right = "80px";
+        brand.style.top = "72px";
+        brand.style.textAlign = "center";
+        brand.style.fontSize = "28px";
+        brand.style.fontWeight = "800";
+        brand.style.letterSpacing = "2px";
+        brand.style.color = theme.dark;
+        root.appendChild(brand);
+
+        const title = document.createElement("div");
+        title.innerText = "CERTIFICATE OF MERIT";
+        title.style.position = "absolute";
+        title.style.left = "80px";
+        title.style.right = "80px";
+        title.style.top = "130px";
+        title.style.textAlign = "center";
+        title.style.fontSize = "52px";
+        title.style.fontWeight = "900";
+        title.style.letterSpacing = "4px";
+        title.style.color = "#0f172a";
+        root.appendChild(title);
+
+        const subtitle = document.createElement("div");
+        subtitle.innerText = `${certificate.positionLabel} • ${certificate.programmeName}`;
+        subtitle.style.position = "absolute";
+        subtitle.style.left = "100px";
+        subtitle.style.right = "100px";
+        subtitle.style.bottom = "84px";
+        subtitle.style.textAlign = "center";
+        subtitle.style.fontSize = "20px";
+        subtitle.style.fontWeight = "800";
+        subtitle.style.color = theme.primary;
+        root.appendChild(subtitle);
+      }
+
+      const messageBox = document.createElement("div");
+      messageBox.innerText = certificate.messageText;
+      messageBox.style.position = "absolute";
+      messageBox.style.left = `${certificateSettings.textXmm * pxPerMm}px`;
+      messageBox.style.top = `${certificateSettings.textYmm * pxPerMm}px`;
+      messageBox.style.width = `${certificateSettings.textWidthMm * pxPerMm}px`;
+      messageBox.style.whiteSpace = "pre-wrap";
+      messageBox.style.textAlign = certificateSettings.textAlign;
+      messageBox.style.fontFamily = certificateSettings.fontFamily;
+      messageBox.style.fontSize = `${certificateSettings.fontSizePt * 1.333}px`;
+      messageBox.style.lineHeight = String(certificateSettings.lineHeight);
+      messageBox.style.fontWeight = "600";
+      messageBox.style.color = certificateSettings.textColor;
+      messageBox.style.boxSizing = "border-box";
+      root.appendChild(messageBox);
+
+      document.body.appendChild(root);
+
+      if ("fonts" in document) {
+        try {
+          await (document as any).fonts.ready;
+        } catch {
+          // Continue with the available font.
+        }
+      }
+
+      const canvas = await html2canvas(root, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      root.remove();
+      certificateRoot = null;
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png", 1),
+      );
+
+      if (!blob) throw new Error("Unable to prepare the certificate image.");
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${safeDownloadName(student.name)}-${safeDownloadName(
+        certificate.programmeName,
+      )}-${certificate.position}-certificate.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setMessage("Certificate downloaded.");
+    } catch (error: any) {
+      setLookupError(
+        error?.message || "Unable to download the certificate right now.",
+      );
+    } finally {
+      certificateRoot?.remove();
+      setDownloadingCertificateId("");
+    }
   }
 
   async function shareLookupPage() {
@@ -679,14 +832,16 @@ export default function ParentStudentProgrammeLookupPage() {
         <div className="absolute -bottom-28 -left-10 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
 
         <div className="relative mx-auto max-w-6xl px-4 pb-12 pt-5 sm:px-6 sm:pb-16 sm:pt-7">
-          <div className="flex items-center justify-between gap-4">
-            <Link
-              href={`/event/${slug}`}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-black backdrop-blur transition hover:bg-white/15"
-            >
-              <ArrowLeft size={15} />
-              Event Page
-            </Link>
+          <div className={`flex items-center gap-4 ${eventInfo.is_public ? "justify-between" : "justify-end"}`}>
+            {eventInfo.is_public && (
+              <Link
+                href={`/event/${slug}`}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 text-xs font-black backdrop-blur transition hover:bg-white/15"
+              >
+                <ArrowLeft size={15} />
+                Event Page
+              </Link>
+            )}
 
             <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] backdrop-blur">
               <Sparkles size={12} />
@@ -951,6 +1106,73 @@ export default function ParentStudentProgrammeLookupPage() {
                 </div>
               </div>
             </section>
+
+            {certificates.length > 0 && (
+              <section className="lookup-no-print overflow-hidden rounded-[2rem] border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 shadow-lg sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                      <Trophy size={21} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-700">
+                        Achievement Certificates
+                      </p>
+                      <h3 className="mt-1 text-xl font-black tracking-[-0.04em] text-slate-950">
+                        My Certificates
+                      </h3>
+                      <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                        Available automatically for eligible published positions configured by the event administrator.
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-amber-700 ring-1 ring-amber-200">
+                    {certificates.length} available
+                  </span>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  {certificates.map((certificate) => (
+                    <div
+                      key={certificate.id}
+                      className="rounded-2xl border border-amber-100 bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-amber-800">
+                            {certificate.positionLabel}
+                          </span>
+                          <p className="mt-3 truncate text-base font-black uppercase tracking-[-0.03em] text-slate-950">
+                            {certificate.programmeName}
+                          </p>
+                          <p className="mt-1 text-xs font-bold text-slate-500">
+                            {certificate.categoryName}
+                            {certificate.grade ? ` • Grade ${certificate.grade}` : ""}
+                          </p>
+                        </div>
+
+                        <BadgeCheck size={22} className="shrink-0 text-amber-600" />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void downloadCertificate(certificate)}
+                        disabled={Boolean(downloadingCertificateId)}
+                        className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {downloadingCertificateId === certificate.id ? (
+                          <Loader2 size={15} className="animate-spin" />
+                        ) : (
+                          <Download size={15} />
+                        )}
+                        Download Certificate
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {nextProgramme && nextProgramme.schedule && (
               <section
