@@ -603,7 +603,16 @@ async function loadStudentProgrammes(
     ),
   };
 
-  const publicPositions = certificateSettings.public_positions;
+  // Public certificate downloads are available only after the admin has
+  // uploaded a Merit Certificate template. Without a template, keep the
+  // entire certificate feature hidden from Student Lookup.
+  const hasCertificateTemplate = Boolean(
+    clean(certificateSettings.preview_template_url),
+  );
+
+  const publicPositions = hasCertificateTemplate
+    ? certificateSettings.public_positions
+    : [];
 
   const { data: publishedResultRows, error: publishedResultError } =
     programmeIds.length > 0 && publicPositions.length > 0

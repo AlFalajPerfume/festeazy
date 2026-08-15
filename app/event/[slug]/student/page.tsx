@@ -1107,7 +1107,7 @@ export default function ParentStudentProgrammeLookupPage() {
               </div>
             </section>
 
-            {certificates.length > 0 && (
+            {Boolean(certificateSettings.templateUrl) && certificates.length > 0 && (
               <section className="lookup-no-print overflow-hidden rounded-[2rem] border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 shadow-lg sm:p-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
