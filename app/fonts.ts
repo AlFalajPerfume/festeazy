@@ -1,5 +1,5 @@
 export const GOOGLE_FONT_STYLESHEET_URL =
-  "https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Cinzel:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&family=League+Spartan:wght@300;400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Montserrat:wght@300;400;500;600;700;800;900&family=Noto+Kufi+Arabic:wght@400;500;600;700;800;900&family=Noto+Sans+Arabic:wght@400;500;600;700;800;900&family=Noto+Sans+Malayalam:wght@400;500;600;700;800;900&family=Noto+Serif+Malayalam:wght@400;500;600;700;800;900&family=Oswald:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Roboto:wght@300;400;500;600;700;800;900&display=swap";
+  "https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Cinzel:wght@400;500;600;700;800;900&family=Great+Vibes&family=Inter:wght@300;400;500;600;700;800;900&family=League+Spartan:wght@300;400;500;600;700;800;900&family=Merriweather:wght@300;400;700;900&family=Montserrat:wght@300;400;500;600;700;800;900&family=Noto+Kufi+Arabic:wght@400;500;600;700;800;900&family=Noto+Sans+Arabic:wght@400;500;600;700;800;900&family=Noto+Sans+Malayalam:wght@400;500;600;700;800;900&family=Noto+Serif+Malayalam:wght@400;500;600;700;800;900&family=Oswald:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&family=Roboto:wght@300;400;500;600;700;800;900&family=Source+Sans+3:wght@300;400;500;600;700;800;900&display=swap";
 
 export const CUSTOM_FONT_FACE_CSS = `
 @font-face {
@@ -83,6 +83,12 @@ export const FONT_OPTION_GROUPS: Array<{
         availableWeights: [300, 400, 500, 600, 700, 800, 900],
       },
       {
+        label: "Great Vibes",
+        value: '"Great Vibes", "Brush Script MT", cursive',
+        group: "Base Fonts",
+        availableWeights: [400],
+      },
+      {
         label: "Inter",
         value: "Inter, Arial, Helvetica, sans-serif",
         group: "Base Fonts",
@@ -93,6 +99,18 @@ export const FONT_OPTION_GROUPS: Array<{
         value: "Roboto, Arial, Helvetica, sans-serif",
         group: "Base Fonts",
         availableWeights: [300, 400, 500, 600, 700, 800, 900],
+      },
+      {
+        label: "Myriad Pro",
+        value: '"Myriad Pro", "Source Sans 3", Arial, Helvetica, sans-serif',
+        group: "Base Fonts",
+        availableWeights: [300, 400, 500, 600, 700, 800, 900],
+      },
+      {
+        label: "Renata",
+        value: '"Renata", "Great Vibes", "Brush Script MT", cursive',
+        group: "Base Fonts",
+        availableWeights: [400],
       },
       {
         label: "Arial",

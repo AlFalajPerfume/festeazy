@@ -41,6 +41,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from "react";
 
 type Organization = {
@@ -99,6 +100,21 @@ type ResultItem = {
   published_at: string | null;
 };
 
+type StudentNameLayout = {
+  x_mm: number;
+  y_mm: number;
+  width_mm: number;
+  font_size_pt: number;
+  line_height: number;
+  text_color: string;
+  text_align: "left" | "center" | "right";
+  font_family: string;
+};
+
+type CertificateLayoutConfig = {
+  student_name: StudentNameLayout;
+};
+
 type CertificateSettings = {
   id?: string;
   message_template: string;
@@ -113,6 +129,7 @@ type CertificateSettings = {
   preview_template_url: string | null;
   preview_template_path: string | null;
   public_positions: number[];
+  layout_config: CertificateLayoutConfig;
 };
 
 type IssuedCertificate = {
@@ -154,11 +171,22 @@ type EditorSelection =
       issued: IssuedCertificate;
     };
 
-const DEFAULT_MESSAGE_TEMPLATE = `This Certificate of Merit is awarded to {student_name} of {organization_name} for securing {grade} Grade in {programme_name} in {event_title} held on {event_date} at {venue}.
+const DEFAULT_MESSAGE_TEMPLATE = `is hereby awarded this Certificate of Achievement for securing {position} in {programme_name} during {event_title}, held on {event_date} at {venue}.
 
 Category: {category_name}
 
-We wish {pronoun} all the best for a glorious future.`;
+We congratulate {pronoun} on this achievement and wish {pronoun} continued success.`;
+
+const DEFAULT_STUDENT_NAME_LAYOUT: StudentNameLayout = {
+  x_mm: 82,
+  y_mm: 73,
+  width_mm: 190,
+  font_size_pt: 31,
+  line_height: 1.05,
+  text_color: "#4b5563",
+  text_align: "center",
+  font_family: '"Great Vibes", "Brush Script MT", cursive',
+};
 
 const DEFAULT_SETTINGS: CertificateSettings = {
   message_template: DEFAULT_MESSAGE_TEMPLATE,
@@ -173,6 +201,9 @@ const DEFAULT_SETTINGS: CertificateSettings = {
   preview_template_url: null,
   preview_template_path: null,
   public_positions: [1, 2],
+  layout_config: {
+    student_name: { ...DEFAULT_STUDENT_NAME_LAYOUT },
+  },
 };
 
 const MESSAGE_TOKENS = [
@@ -222,6 +253,35 @@ function normalizePublicPositions(value: unknown) {
   ).sort((a, b) => a - b);
 }
 
+function normalizeStudentNameLayout(value: any): StudentNameLayout {
+  const source = value && typeof value === "object" ? value : {};
+  const align = ["left", "center", "right"].includes(source.text_align)
+    ? source.text_align
+    : DEFAULT_STUDENT_NAME_LAYOUT.text_align;
+
+  return {
+    x_mm: safeNumber(source.x_mm, DEFAULT_STUDENT_NAME_LAYOUT.x_mm),
+    y_mm: safeNumber(source.y_mm, DEFAULT_STUDENT_NAME_LAYOUT.y_mm),
+    width_mm: safeNumber(source.width_mm, DEFAULT_STUDENT_NAME_LAYOUT.width_mm),
+    font_size_pt: safeNumber(
+      source.font_size_pt,
+      DEFAULT_STUDENT_NAME_LAYOUT.font_size_pt,
+    ),
+    line_height: safeNumber(
+      source.line_height,
+      DEFAULT_STUDENT_NAME_LAYOUT.line_height,
+    ),
+    text_color:
+      typeof source.text_color === "string" && /^#[0-9a-fA-F]{6}$/.test(source.text_color)
+        ? source.text_color
+        : DEFAULT_STUDENT_NAME_LAYOUT.text_color,
+    text_align: align,
+    font_family: normalizeFontFamily(
+      source.font_family || DEFAULT_STUDENT_NAME_LAYOUT.font_family,
+    ),
+  };
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);
@@ -260,15 +320,47 @@ function pronounForGender(gender: string | null) {
   return "them";
 }
 
+
+function richTextToHtml(value: string) {
+  return escapeHtml(value)
+    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br />");
+}
+
+function renderRichCertificateText(value: string): ReactNode {
+  const parts = String(value || "").split(/(\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
+function fontSizePtToPreviewCqw(fontSizePt: number) {
+  const fontSizeMm = (fontSizePt * 25.4) / 72;
+  return `${(fontSizeMm / A4_LANDSCAPE_WIDTH_MM) * 100}cqw`;
+}
+
 export default function CertificatesPage() {
   const previewPaperRef = useRef<HTMLDivElement | null>(null);
   const previewTemplateInputRef = useRef<HTMLInputElement | null>(null);
+  const defaultMessageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editableMessageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageDragRef = useRef<{
     startClientX: number;
     startClientY: number;
     startXmm: number;
     startYmm: number;
     messageHeightMm: number;
+  } | null>(null);
+  const studentNameDragRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    startXmm: number;
+    startYmm: number;
+    elementHeightMm: number;
   } | null>(null);
 
   const [organization, setOrganization] = useState<Organization | null>(null);
@@ -293,6 +385,7 @@ export default function CertificatesPage() {
   const [messageText, setMessageText] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [isDraggingMessage, setIsDraggingMessage] = useState(false);
+  const [isDraggingStudentName, setIsDraggingStudentName] = useState(false);
   const [isUploadingPreviewTemplate, setIsUploadingPreviewTemplate] =
     useState(false);
   const [isRemovingPreviewTemplate, setIsRemovingPreviewTemplate] =
@@ -312,6 +405,8 @@ export default function CertificatesPage() {
     return () => {
       window.removeEventListener("pointermove", handleMessageDrag);
       window.removeEventListener("pointerup", stopMessageDrag);
+      window.removeEventListener("pointermove", handleStudentNameDrag);
+      window.removeEventListener("pointerup", stopStudentNameDrag);
     };
   }, []);
 
@@ -643,6 +738,11 @@ export default function CertificatesPage() {
         public_positions: normalizePublicPositions(
           certificateResponse.settings?.public_positions,
         ),
+        layout_config: {
+          student_name: normalizeStudentNameLayout(
+            certificateResponse.settings?.layout_config?.student_name,
+          ),
+        },
         text_x_mm: safeNumber(
           certificateResponse.settings?.text_x_mm,
           DEFAULT_SETTINGS.text_x_mm,
@@ -672,6 +772,28 @@ export default function CertificatesPage() {
     } finally {
       setIsLoading(false);
     }
+  }
+
+
+  function wrapSelectedTextBold(
+    textarea: HTMLTextAreaElement | null,
+    currentValue: string,
+    applyValue: (nextValue: string) => void,
+  ) {
+    const start = textarea?.selectionStart ?? currentValue.length;
+    const end = textarea?.selectionEnd ?? currentValue.length;
+    const selectedText = currentValue.slice(start, end) || "bold text";
+    const replacement = `**${selectedText}**`;
+    const nextValue =
+      currentValue.slice(0, start) + replacement + currentValue.slice(end);
+
+    applyValue(nextValue);
+
+    window.requestAnimationFrame(() => {
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(start + 2, start + 2 + selectedText.length);
+    });
   }
 
   function eventDateText() {
@@ -759,23 +881,27 @@ export default function CertificatesPage() {
 
   function printCertificateMessages(
     printWindow: Window,
-    messages: string[],
+    certificatePages: Array<{ studentName: string; message: string }>,
   ) {
     const safeFontFamily = normalizeFontFamily(settings.font_family).replace(
       /[<>{};]/g,
       "",
     );
 
-    const pages = messages
-      .map((certificateMessage, index) => {
-        const safeMessage = escapeHtml(certificateMessage).replace(
-          /\n/g,
-          "<br />",
-        );
+    const studentNameLayout = settings.layout_config.student_name;
+    const safeStudentNameFontFamily = normalizeFontFamily(
+      studentNameLayout.font_family,
+    ).replace(/[<>{};]/g, "");
+
+    const pages = certificatePages
+      .map((certificatePage, index) => {
+        const safeStudentName = escapeHtml(certificatePage.studentName);
+        const safeMessage = richTextToHtml(certificatePage.message);
 
         return `<section class="certificate-page${
-          index === messages.length - 1 ? " last-page" : ""
+          index === certificatePages.length - 1 ? " last-page" : ""
         }">
+  <div class="certificate-student-name">${safeStudentName}</div>
   <div class="certificate-message">${safeMessage}</div>
 </section>`;
       })
@@ -820,6 +946,26 @@ export default function CertificatesPage() {
     .certificate-page.last-page {
       page-break-after: auto;
       break-after: auto;
+    }
+
+    .certificate-student-name {
+      position: absolute;
+      left: ${studentNameLayout.x_mm}mm;
+      top: ${studentNameLayout.y_mm}mm;
+      width: ${studentNameLayout.width_mm}mm;
+      margin: 0;
+      padding: 0;
+      color: ${studentNameLayout.text_color};
+      font-family: ${safeStudentNameFontFamily};
+      font-size: ${studentNameLayout.font_size_pt}pt;
+      line-height: ${studentNameLayout.line_height};
+      text-align: ${studentNameLayout.text_align};
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .certificate-message strong {
+      font-weight: 700;
     }
 
     .certificate-message {
@@ -906,6 +1052,14 @@ export default function CertificatesPage() {
         payload.settings?.preview_template_url || null,
       preview_template_path:
         payload.settings?.preview_template_path || null,
+      public_positions: normalizePublicPositions(
+        payload.settings?.public_positions,
+      ),
+      layout_config: {
+        student_name: normalizeStudentNameLayout(
+          payload.settings?.layout_config?.student_name,
+        ),
+      },
     } as CertificateSettings;
 
     setSettings(savedSettings);
@@ -1071,7 +1225,12 @@ export default function CertificatesPage() {
       setMessage(
         "Certificate marked as issued. It is removed from the Pending list.",
       );
-      printCertificateMessages(printWindow, [messageText]);
+      printCertificateMessages(printWindow, [
+        {
+          studentName: selection.candidate.student.name,
+          message: messageText,
+        },
+      ]);
     } catch (issueError: any) {
       printWindow.close();
 
@@ -1112,7 +1271,7 @@ export default function CertificatesPage() {
     setMessage("");
 
     const createdCertificates: IssuedCertificate[] = [];
-    const certificateMessages: string[] = [];
+    const certificatePages: Array<{ studentName: string; message: string }> = [];
 
     try {
       for (const candidate of selectedPendingGroupMembers) {
@@ -1130,7 +1289,10 @@ export default function CertificatesPage() {
         createdCertificates.push(
           payload.certificate as IssuedCertificate,
         );
-        certificateMessages.push(memberMessage);
+        certificatePages.push({
+          studentName: candidate.student.name,
+          message: memberMessage,
+        });
       }
 
       setIssuedCertificates((current) =>
@@ -1155,13 +1317,13 @@ export default function CertificatesPage() {
       setMessage(
         `${createdCertificates.length} group-member certificates were marked as issued and prepared for printing.`,
       );
-      printCertificateMessages(printWindow, certificateMessages);
+      printCertificateMessages(printWindow, certificatePages);
     } catch (groupError: any) {
       if (createdCertificates.length > 0) {
         setIssuedCertificates((current) =>
           mergeIssuedCertificates(current, createdCertificates),
         );
-        printCertificateMessages(printWindow, certificateMessages);
+        printCertificateMessages(printWindow, certificatePages);
         setError(
           `${createdCertificates.length} certificate(s) were issued before an error occurred. ${groupError?.message || ""}`.trim(),
         );
@@ -1207,7 +1369,15 @@ export default function CertificatesPage() {
         issued: certificate,
       });
       setMessage("Certificate wording updated. Reprint uses the same record.");
-      printCertificateMessages(printWindow, [messageText]);
+      printCertificateMessages(printWindow, [
+        {
+          studentName:
+            selection.issued.locked_data?.student_name ||
+            selection.candidate?.student.name ||
+            "Student",
+          message: messageText,
+        },
+      ]);
     } catch (reprintError: any) {
       printWindow.close();
       setError(reprintError?.message || "Unable to reprint this certificate.");
@@ -1216,6 +1386,129 @@ export default function CertificatesPage() {
     }
   }
 
+
+  function startStudentNameDrag(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const paper = previewPaperRef.current;
+    if (!paper) return;
+
+    const paperRect = paper.getBoundingClientRect();
+    const elementRect = event.currentTarget.getBoundingClientRect();
+    const layout = settings.layout_config.student_name;
+
+    studentNameDragRef.current = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startXmm: layout.x_mm,
+      startYmm: layout.y_mm,
+      elementHeightMm:
+        (elementRect.height / Math.max(1, paperRect.height)) *
+        A4_LANDSCAPE_HEIGHT_MM,
+    };
+
+    setIsDraggingStudentName(true);
+    window.addEventListener("pointermove", handleStudentNameDrag);
+    window.addEventListener("pointerup", stopStudentNameDrag);
+  }
+
+  function handleStudentNameDrag(event: globalThis.PointerEvent) {
+    const drag = studentNameDragRef.current;
+    const paper = previewPaperRef.current;
+    if (!drag || !paper) return;
+
+    const paperRect = paper.getBoundingClientRect();
+    const deltaXmm =
+      ((event.clientX - drag.startClientX) / Math.max(1, paperRect.width)) *
+      A4_LANDSCAPE_WIDTH_MM;
+    const deltaYmm =
+      ((event.clientY - drag.startClientY) / Math.max(1, paperRect.height)) *
+      A4_LANDSCAPE_HEIGHT_MM;
+
+    setSettings((current) => {
+      const layout = current.layout_config.student_name;
+      const maximumX = Math.max(0, A4_LANDSCAPE_WIDTH_MM - layout.width_mm);
+      const maximumY = Math.max(
+        0,
+        A4_LANDSCAPE_HEIGHT_MM - drag.elementHeightMm,
+      );
+
+      return {
+        ...current,
+        layout_config: {
+          ...current.layout_config,
+          student_name: {
+            ...layout,
+            x_mm: Number(
+              clamp(drag.startXmm + deltaXmm, 0, maximumX).toFixed(1),
+            ),
+            y_mm: Number(
+              clamp(drag.startYmm + deltaYmm, 0, maximumY).toFixed(1),
+            ),
+          },
+        },
+      };
+    });
+  }
+
+  function stopStudentNameDrag() {
+    studentNameDragRef.current = null;
+    setIsDraggingStudentName(false);
+    window.removeEventListener("pointermove", handleStudentNameDrag);
+    window.removeEventListener("pointerup", stopStudentNameDrag);
+  }
+
+  function nudgeStudentName(event: KeyboardEvent<HTMLDivElement>) {
+    const movement = event.shiftKey ? 2 : 0.5;
+    let deltaX = 0;
+    let deltaY = 0;
+
+    if (event.key === "ArrowLeft") deltaX = -movement;
+    if (event.key === "ArrowRight") deltaX = movement;
+    if (event.key === "ArrowUp") deltaY = -movement;
+    if (event.key === "ArrowDown") deltaY = movement;
+    if (deltaX === 0 && deltaY === 0) return;
+
+    event.preventDefault();
+
+    setSettings((current) => {
+      const layout = current.layout_config.student_name;
+      return {
+        ...current,
+        layout_config: {
+          ...current.layout_config,
+          student_name: {
+            ...layout,
+            x_mm: Number(
+              clamp(
+                layout.x_mm + deltaX,
+                0,
+                Math.max(0, A4_LANDSCAPE_WIDTH_MM - layout.width_mm),
+              ).toFixed(1),
+            ),
+            y_mm: Number(
+              clamp(
+                layout.y_mm + deltaY,
+                0,
+                A4_LANDSCAPE_HEIGHT_MM - 8,
+              ).toFixed(1),
+            ),
+          },
+        },
+      };
+    });
+  }
+
+  function resetStudentNamePosition() {
+    setSettings((current) => ({
+      ...current,
+      layout_config: {
+        ...current.layout_config,
+        student_name: { ...DEFAULT_STUDENT_NAME_LAYOUT },
+      },
+    }));
+  }
 
   function startMessageDrag(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -1336,13 +1629,33 @@ export default function CertificatesPage() {
     setGradeFilter("all");
   }
 
+  const previewStudentName =
+    selection?.mode === "pending"
+      ? selection.candidate.student.name
+      : selection?.mode === "issued"
+        ? selection.issued.locked_data?.student_name || "Student Name"
+        : "Student Name";
+
+  const studentNameLayout = settings.layout_config.student_name;
+  const previewStudentNameStyle: CSSProperties = {
+    left: `${(studentNameLayout.x_mm / A4_LANDSCAPE_WIDTH_MM) * 100}%`,
+    top: `${(studentNameLayout.y_mm / A4_LANDSCAPE_HEIGHT_MM) * 100}%`,
+    width: `${(studentNameLayout.width_mm / A4_LANDSCAPE_WIDTH_MM) * 100}%`,
+    color: studentNameLayout.text_color,
+    fontFamily: studentNameLayout.font_family,
+    fontSize: fontSizePtToPreviewCqw(studentNameLayout.font_size_pt),
+    lineHeight: studentNameLayout.line_height,
+    textAlign: studentNameLayout.text_align,
+    whiteSpace: "pre-wrap",
+  };
+
   const previewTextStyle: CSSProperties = {
     left: `${(settings.text_x_mm / A4_LANDSCAPE_WIDTH_MM) * 100}%`,
     top: `${(settings.text_y_mm / A4_LANDSCAPE_HEIGHT_MM) * 100}%`,
     width: `${(settings.text_width_mm / A4_LANDSCAPE_WIDTH_MM) * 100}%`,
     color: settings.text_color,
     fontFamily: settings.font_family,
-    fontSize: `${Math.max(8, settings.font_size_pt * 0.82)}px`,
+    fontSize: fontSizePtToPreviewCqw(settings.font_size_pt),
     lineHeight: settings.line_height,
     textAlign: settings.text_align,
     whiteSpace: "pre-wrap",
@@ -1351,7 +1664,7 @@ export default function CertificatesPage() {
   return (
     <AdminShell
       title="Merit Certificates"
-      subtitle="Print only the editable certificate message on your pre-printed A4 landscape certificate."
+      subtitle="Print the student name and editable message on your pre-printed A4 landscape certificate."
       actions={
         <button
           type="button"
@@ -1415,7 +1728,7 @@ export default function CertificatesPage() {
                 Certificate Settings
               </h2>
               <p className="mt-1 text-xs font-bold text-slate-500">
-                Manage Student Lookup eligibility, certificate wording and print alignment. FestEazy still prints only the message on pre-printed certificates.
+                Manage Student Lookup eligibility, student-name styling, certificate wording and print alignment. Admin printing outputs only the dynamic student name and message on pre-printed certificates.
               </p>
             </div>
             <ChevronDown
@@ -1432,6 +1745,7 @@ export default function CertificatesPage() {
                 Default Message
               </label>
               <textarea
+                ref={defaultMessageTextareaRef}
                 value={settings.message_template}
                 onChange={(event) =>
                   setSettings((current) => ({
@@ -1442,6 +1756,30 @@ export default function CertificatesPage() {
                 rows={7}
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
               />
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    wrapSelectedTextBold(
+                      defaultMessageTextareaRef.current,
+                      settings.message_template,
+                      (nextValue) =>
+                        setSettings((current) => ({
+                          ...current,
+                          message_template: nextValue,
+                        })),
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  <span className="text-sm font-black">B</span>
+                  Bold selected text
+                </button>
+                <span className="text-[10px] font-bold text-slate-400">
+                  Bold content is stored as **text** and is used in preview, print and Student Lookup downloads.
+                </span>
+              </div>
 
               <div className="mt-3 flex flex-wrap gap-2">
                 {MESSAGE_TOKENS.map((token) => (
@@ -1523,7 +1861,204 @@ export default function CertificatesPage() {
                 </p>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">Student Name Layer</p>
+                    <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                      Printed separately from the certificate message. Drag the name in the preview or fine-tune these values.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resetStudentNamePosition}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-2 text-[10px] font-black text-violet-700"
+                  >
+                    <RotateCcw size={12} />
+                    Reset name layer
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <SettingsNumber
+                    label="Name Left (mm)"
+                    value={studentNameLayout.x_mm}
+                    min={0}
+                    max={280}
+                    step={1}
+                    onChange={(value) =>
+                      setSettings((current) => ({
+                        ...current,
+                        layout_config: {
+                          ...current.layout_config,
+                          student_name: {
+                            ...current.layout_config.student_name,
+                            x_mm: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <SettingsNumber
+                    label="Name Top (mm)"
+                    value={studentNameLayout.y_mm}
+                    min={0}
+                    max={195}
+                    step={1}
+                    onChange={(value) =>
+                      setSettings((current) => ({
+                        ...current,
+                        layout_config: {
+                          ...current.layout_config,
+                          student_name: {
+                            ...current.layout_config.student_name,
+                            y_mm: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <SettingsNumber
+                    label="Name Width (mm)"
+                    value={studentNameLayout.width_mm}
+                    min={40}
+                    max={290}
+                    step={1}
+                    onChange={(value) =>
+                      setSettings((current) => ({
+                        ...current,
+                        layout_config: {
+                          ...current.layout_config,
+                          student_name: {
+                            ...current.layout_config.student_name,
+                            width_mm: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <SettingsNumber
+                    label="Name Font Size (pt)"
+                    value={studentNameLayout.font_size_pt}
+                    min={8}
+                    max={72}
+                    step={0.5}
+                    onChange={(value) =>
+                      setSettings((current) => ({
+                        ...current,
+                        layout_config: {
+                          ...current.layout_config,
+                          student_name: {
+                            ...current.layout_config.student_name,
+                            font_size_pt: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <SettingsNumber
+                    label="Name Line Height"
+                    value={studentNameLayout.line_height}
+                    min={0.7}
+                    max={2}
+                    step={0.05}
+                    onChange={(value) =>
+                      setSettings((current) => ({
+                        ...current,
+                        layout_config: {
+                          ...current.layout_config,
+                          student_name: {
+                            ...current.layout_config.student_name,
+                            line_height: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      Name Colour
+                    </label>
+                    <input
+                      type="color"
+                      value={studentNameLayout.text_color}
+                      onChange={(event) =>
+                        setSettings((current) => ({
+                          ...current,
+                          layout_config: {
+                            ...current.layout_config,
+                            student_name: {
+                              ...current.layout_config.student_name,
+                              text_color: event.target.value,
+                            },
+                          },
+                        }))
+                      }
+                      className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white p-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      Name Alignment
+                    </label>
+                    <select
+                      value={studentNameLayout.text_align}
+                      onChange={(event) =>
+                        setSettings((current) => ({
+                          ...current,
+                          layout_config: {
+                            ...current.layout_config,
+                            student_name: {
+                              ...current.layout_config.student_name,
+                              text_align: event.target.value as any,
+                            },
+                          },
+                        }))
+                      }
+                      className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold"
+                    >
+                      <option value="left">Left</option>
+                      <option value="center">Centre</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      Name Font
+                    </label>
+                    <FontFamilySelect
+                      value={studentNameLayout.font_family}
+                      onChange={(fontFamily) =>
+                        setSettings((current) => ({
+                          ...current,
+                          layout_config: {
+                            ...current.layout_config,
+                            student_name: {
+                              ...current.layout_config.student_name,
+                              font_family: fontFamily,
+                            },
+                          },
+                        }))
+                      }
+                      includeGeorgia
+                      ariaLabel="Student name font family"
+                      className="mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-sm font-black text-slate-950">Certificate Message Layer</p>
+                <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                  Position, programme, grade and other values can stay inside the message using the tokens above.
+                </p>
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <SettingsNumber
                   label="Left Position (mm)"
                   value={settings.text_x_mm}
@@ -1885,19 +2420,36 @@ export default function CertificatesPage() {
                       Editable Printed Message
                     </label>
                     <textarea
+                      ref={editableMessageTextareaRef}
                       value={messageText}
                       onChange={(event) => setMessageText(event.target.value)}
                       rows={8}
                       className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                     />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          wrapSelectedTextBold(
+                            editableMessageTextareaRef.current,
+                            messageText,
+                            setMessageText,
+                          )
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+                      >
+                        <span className="text-sm font-black">B</span>
+                        Bold selected text
+                      </button>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        Select words first, then press Bold.
+                      </span>
+                    </div>
                     <p className="mt-2 text-xs font-bold leading-5 text-slate-400">
-                      This box shows the final filled message for the selected
-                      student. The saved Default Wording uses tokens such as
-                      {" {student_name} "}, {" {organization_name} "},
-                      {" {programme_name} "} and {" {grade} "}. For group
-                      programmes, each member receives a separate page and
-                      {" {student_name} "} is replaced with that member&apos;s
-                      name automatically.
+                      The student name is printed as its own styled layer. This box is only the certificate message. The saved Default Wording can use tokens such as
+                      {" {position} "}, {" {organization_name} "},
+                      {" {programme_name} "} and {" {grade} "}. The
+                      {" {student_name} "} token is still available if you intentionally want the name repeated inside the message.
                     </p>
                   </div>
 
@@ -1909,7 +2461,7 @@ export default function CertificatesPage() {
                         </p>
                         <p className="mt-1 flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
                           <Move size={13} />
-                          Drag the blue message box. Use arrow keys for fine adjustment.
+                          Drag the purple student name and blue message boxes. Use arrow keys for fine adjustment.
                         </p>
                       </div>
 
@@ -1957,7 +2509,7 @@ export default function CertificatesPage() {
                         )}
 
                         <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-600">
-                          Printing: message only
+                          Printing: name + message only
                         </span>
                         <button
                           type="button"
@@ -1986,7 +2538,7 @@ export default function CertificatesPage() {
                       <div
                         ref={previewPaperRef}
                         className="relative mx-auto w-full max-w-[900px] overflow-hidden bg-white shadow-xl"
-                        style={{ aspectRatio: "297 / 210" }}
+                        style={{ aspectRatio: "297 / 210", containerType: "inline-size" }}
                       >
                         {settings.preview_template_url ? (
                           <img
@@ -2010,6 +2562,32 @@ export default function CertificatesPage() {
                         )}
 
                         <div className="pointer-events-none absolute inset-3 rounded-lg border border-dashed border-slate-300/70" />
+
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          aria-label="Draggable student name"
+                          onPointerDown={startStudentNameDrag}
+                          onKeyDown={nudgeStudentName}
+                          className={`absolute rounded border-2 border-dashed px-1 outline-none transition ${
+                            isDraggingStudentName
+                              ? "cursor-grabbing border-violet-500 bg-violet-100/40 shadow-lg ring-4 ring-violet-200/60"
+                              : "cursor-grab border-violet-300 bg-violet-50/25 hover:border-violet-500 hover:bg-violet-50/35 focus:border-violet-500 focus:ring-4 focus:ring-violet-200/60"
+                          }`}
+                          style={{
+                            ...previewStudentNameStyle,
+                            touchAction: "none",
+                            userSelect: "none",
+                          }}
+                          title="Drag to position the student name. Arrow keys move 0.5 mm; Shift + arrow moves 2 mm."
+                        >
+                          <span className="pointer-events-none absolute -top-7 left-0 inline-flex items-center gap-1 rounded-md bg-violet-700 px-2 py-1 text-[9px] font-black text-white shadow-sm">
+                            <Move size={10} />
+                            Drag student name
+                          </span>
+                          {previewStudentName}
+                        </div>
+
                         <div
                           role="button"
                           tabIndex={0}
@@ -2032,7 +2610,7 @@ export default function CertificatesPage() {
                             <Move size={10} />
                             Drag message
                           </span>
-                          {messageText}
+                          {renderRichCertificateText(messageText)}
                         </div>
 
                         {settings.preview_template_url && (

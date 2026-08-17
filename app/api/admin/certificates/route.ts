@@ -6,11 +6,22 @@ import {
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { NextRequest, NextResponse } from "next/server";
 
-const DEFAULT_MESSAGE_TEMPLATE = `This Certificate of Merit is awarded to {student_name} of {organization_name} for securing {grade} Grade in {programme_name} in {event_title} held on {event_date} at {venue}.
+const DEFAULT_MESSAGE_TEMPLATE = `is hereby awarded this Certificate of Achievement for securing {position} in {programme_name} during {event_title}, held on {event_date} at {venue}.
 
 Category: {category_name}
 
-We wish {pronoun} all the best for a glorious future.`;
+We congratulate {pronoun} on this achievement and wish {pronoun} continued success.`;
+
+const DEFAULT_STUDENT_NAME_LAYOUT = {
+  x_mm: 82,
+  y_mm: 73,
+  width_mm: 190,
+  font_size_pt: 31,
+  line_height: 1.05,
+  text_color: "#4b5563",
+  text_align: "center",
+  font_family: '"Great Vibes", "Brush Script MT", cursive',
+};
 
 const DEFAULT_SETTINGS = {
   message_template: DEFAULT_MESSAGE_TEMPLATE,
@@ -25,6 +36,9 @@ const DEFAULT_SETTINGS = {
   preview_template_url: null,
   preview_template_path: null,
   public_positions: [1, 2],
+  layout_config: {
+    student_name: DEFAULT_STUDENT_NAME_LAYOUT,
+  },
 };
 
 function safeNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -54,6 +68,55 @@ function cleanPublicPositions(value: unknown) {
         .filter((item) => Number.isInteger(item) && item >= 1 && item <= 3),
     ),
   ).sort((a, b) => a - b);
+}
+
+function cleanStudentNameLayout(value: unknown) {
+  const source = value && typeof value === "object" ? (value as any) : {};
+  const textColor = cleanText(
+    source.text_color || DEFAULT_STUDENT_NAME_LAYOUT.text_color,
+    20,
+  );
+  const textAlign = ["left", "center", "right"].includes(source.text_align)
+    ? source.text_align
+    : DEFAULT_STUDENT_NAME_LAYOUT.text_align;
+
+  return {
+    x_mm: safeNumber(source.x_mm, DEFAULT_STUDENT_NAME_LAYOUT.x_mm, 0, 280),
+    y_mm: safeNumber(source.y_mm, DEFAULT_STUDENT_NAME_LAYOUT.y_mm, 0, 195),
+    width_mm: safeNumber(
+      source.width_mm,
+      DEFAULT_STUDENT_NAME_LAYOUT.width_mm,
+      40,
+      290,
+    ),
+    font_size_pt: safeNumber(
+      source.font_size_pt,
+      DEFAULT_STUDENT_NAME_LAYOUT.font_size_pt,
+      8,
+      72,
+    ),
+    line_height: safeNumber(
+      source.line_height,
+      DEFAULT_STUDENT_NAME_LAYOUT.line_height,
+      0.7,
+      2,
+    ),
+    text_color: /^#[0-9a-fA-F]{6}$/.test(textColor)
+      ? textColor
+      : DEFAULT_STUDENT_NAME_LAYOUT.text_color,
+    text_align: textAlign,
+    font_family: cleanText(
+      source.font_family || DEFAULT_STUDENT_NAME_LAYOUT.font_family,
+      200,
+    ),
+  };
+}
+
+function cleanLayoutConfig(value: unknown) {
+  const source = value && typeof value === "object" ? (value as any) : {};
+  return {
+    student_name: cleanStudentNameLayout(source.student_name),
+  };
 }
 
 function formatCertificateYear(value: string | null | undefined) {
@@ -148,6 +211,7 @@ export async function PUT(request: NextRequest) {
       1500,
     ),
     public_positions: cleanPublicPositions(body.public_positions),
+    layout_config: cleanLayoutConfig(body.layout_config),
     updated_at: new Date().toISOString(),
   };
 

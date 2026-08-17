@@ -59,6 +59,17 @@ Category: {category_name}
 
 We wish {pronoun} all the best for a glorious future.`;
 
+const DEFAULT_STUDENT_NAME_LAYOUT = {
+  x_mm: 82,
+  y_mm: 73,
+  width_mm: 190,
+  font_size_pt: 31,
+  line_height: 1.05,
+  text_color: "#4b5563",
+  text_align: "center",
+  font_family: '"Great Vibes", "Brush Script MT", cursive',
+};
+
 const DEFAULT_PUBLIC_CERTIFICATE_SETTINGS = {
   message_template: DEFAULT_CERTIFICATE_MESSAGE_TEMPLATE,
   text_x_mm: 46,
@@ -71,7 +82,71 @@ const DEFAULT_PUBLIC_CERTIFICATE_SETTINGS = {
   font_family: "Arial, Helvetica, sans-serif",
   preview_template_url: null as string | null,
   public_positions: [1, 2] as number[],
+  layout_config: {
+    student_name: DEFAULT_STUDENT_NAME_LAYOUT,
+  },
 };
+
+function safeCertificateNumber(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
+}
+
+function cleanStudentNameLayout(value: unknown) {
+  const source = value && typeof value === "object" ? (value as any) : {};
+  const color = clean(
+    source.text_color || DEFAULT_STUDENT_NAME_LAYOUT.text_color,
+  );
+
+  return {
+    x_mm: safeCertificateNumber(
+      source.x_mm,
+      DEFAULT_STUDENT_NAME_LAYOUT.x_mm,
+      0,
+      280,
+    ),
+    y_mm: safeCertificateNumber(
+      source.y_mm,
+      DEFAULT_STUDENT_NAME_LAYOUT.y_mm,
+      0,
+      195,
+    ),
+    width_mm: safeCertificateNumber(
+      source.width_mm,
+      DEFAULT_STUDENT_NAME_LAYOUT.width_mm,
+      40,
+      290,
+    ),
+    font_size_pt: safeCertificateNumber(
+      source.font_size_pt,
+      DEFAULT_STUDENT_NAME_LAYOUT.font_size_pt,
+      8,
+      72,
+    ),
+    line_height: safeCertificateNumber(
+      source.line_height,
+      DEFAULT_STUDENT_NAME_LAYOUT.line_height,
+      0.7,
+      2,
+    ),
+    text_color: /^#[0-9a-fA-F]{6}$/.test(color)
+      ? color
+      : DEFAULT_STUDENT_NAME_LAYOUT.text_color,
+    text_align: ["left", "center", "right"].includes(
+      clean(source.text_align),
+    )
+      ? clean(source.text_align)
+      : DEFAULT_STUDENT_NAME_LAYOUT.text_align,
+    font_family:
+      clean(source.font_family) || DEFAULT_STUDENT_NAME_LAYOUT.font_family,
+  };
+}
 
 function cleanPublicPositions(value: unknown) {
   if (!Array.isArray(value)) return [1, 2];
@@ -341,6 +416,7 @@ async function loadStudentProgrammes(
   gender: string,
   publicEventInfo: any,
   publicOrganization: any,
+  includeCertificateDownloadData = false,
 ) {
   const { data: matchedStudent, error: studentError } = await supabaseAdmin
     .from("students")
@@ -585,7 +661,7 @@ async function loadStudentProgrammes(
     await supabaseAdmin
       .from("certificate_print_settings")
       .select(
-        "message_template, text_x_mm, text_y_mm, text_width_mm, font_size_pt, line_height, text_color, text_align, font_family, preview_template_url, public_positions",
+        "message_template, text_x_mm, text_y_mm, text_width_mm, font_size_pt, line_height, text_color, text_align, font_family, preview_template_url, public_positions, layout_config",
       )
       .eq("organization_id", organizationId)
       .eq("event_id", eventId)
@@ -601,6 +677,11 @@ async function loadStudentProgrammes(
     public_positions: cleanPublicPositions(
       certificateSettingsRow?.public_positions,
     ),
+    layout_config: {
+      student_name: cleanStudentNameLayout(
+        (certificateSettingsRow as any)?.layout_config?.student_name,
+      ),
+    },
   };
 
   // Public certificate downloads are available only after the admin has
@@ -747,11 +828,28 @@ async function loadStudentProgrammes(
       return String(a.programmeName).localeCompare(String(b.programmeName));
     });
 
+  const publicCertificates = certificates.map((certificate: any) =>
+    includeCertificateDownloadData
+      ? certificate
+      : {
+          id: certificate.id,
+          resultId: certificate.resultId,
+          programmeId: certificate.programmeId,
+          programmeName: certificate.programmeName,
+          programmeType: certificate.programmeType,
+          categoryName: certificate.categoryName,
+          groupName: certificate.groupName,
+          position: certificate.position,
+          positionLabel: certificate.positionLabel,
+          grade: certificate.grade,
+          publishedAt: certificate.publishedAt,
+        },
+  );
+
   return NextResponse.json({
     success: true,
     student: {
       id: matchedStudent.id,
-      chestNo: cleanChest(matchedStudent.chest_no),
       name: matchedStudent.name,
       gender: matchedStudent.gender || "",
       categoryName: categoryRes.data?.name || "General",
@@ -761,8 +859,9 @@ async function loadStudentProgrammes(
       teamColor: teamRes.data?.color || null,
     },
     programmes: assignments,
-    certificates,
-    certificateSettings: {
+    certificates: publicCertificates,
+    certificateSettings: includeCertificateDownloadData
+      ? {
       templateUrl: certificateSettings.preview_template_url || null,
       textXmm: Number(certificateSettings.text_x_mm || 46),
       textYmm: Number(certificateSettings.text_y_mm || 73),
@@ -780,7 +879,22 @@ async function loadStudentProgrammes(
           "Arial, Helvetica, sans-serif",
       ),
       eligiblePositions: publicPositions,
-    },
+      studentNameXmm: certificateSettings.layout_config.student_name.x_mm,
+      studentNameYmm: certificateSettings.layout_config.student_name.y_mm,
+      studentNameWidthMm:
+        certificateSettings.layout_config.student_name.width_mm,
+      studentNameFontSizePt:
+        certificateSettings.layout_config.student_name.font_size_pt,
+      studentNameLineHeight:
+        certificateSettings.layout_config.student_name.line_height,
+      studentNameTextColor:
+        certificateSettings.layout_config.student_name.text_color,
+      studentNameTextAlign:
+        certificateSettings.layout_config.student_name.text_align,
+      studentNameFontFamily:
+        certificateSettings.layout_config.student_name.font_family,
+        }
+      : null,
   });
 }
 
@@ -919,7 +1033,7 @@ export async function POST(
     if (action === "students") {
       const { data, error: studentError } = await supabaseAdmin
         .from("students")
-        .select("id, chest_no, name, gender, division_id, status")
+        .select("id, name, gender, division_id, status")
         .eq("organization_id", organizationId)
         .eq("event_id", eventId)
         .eq("class_id", classId)
@@ -931,7 +1045,6 @@ export async function POST(
 
       const matchingStudents = ((data || []) as Array<{
         id: string;
-        chest_no: string | null;
         name: string;
         gender: string | null;
         division_id: string | null;
@@ -967,18 +1080,76 @@ export async function POST(
           const divisionName = row.division_id
             ? divisionMap.get(String(row.division_id)) || ""
             : "";
-          const chest = cleanChest(row.chest_no);
-
           return {
             id: String(row.id),
             name: String(row.name || "Student"),
             divisionName,
-            // Return the complete chest number for every student.
-            // The searchable dropdown needs the real value (including 4+ digits),
-            // not only the last two digits used by the old duplicate-name hint.
-            chestHint: chest,
           };
         }),
+      });
+    }
+
+    if (action === "certificate") {
+      const studentId = clean(body?.studentId);
+      const certificateId = clean(body?.certificateId);
+      const enteredChest = cleanChest(body?.chestNo);
+
+      if (!studentId) return error("Select a student.");
+      if (!certificateId) return error("Select a certificate.");
+      if (!enteredChest) return error("Enter the chest number.");
+
+      const { data: verificationStudent, error: verificationError } =
+        await supabaseAdmin
+          .from("students")
+          .select("id, chest_no, status, gender, class_id")
+          .eq("id", studentId)
+          .eq("organization_id", organizationId)
+          .eq("event_id", eventId)
+          .eq("class_id", classId)
+          .maybeSingle();
+
+      if (verificationError) throw new Error(verificationError.message);
+
+      if (
+        !verificationStudent ||
+        ["inactive", "disabled"].includes(
+          normalize(verificationStudent.status || "active"),
+        ) ||
+        canonicalGender(verificationStudent.gender) !== gender
+      ) {
+        return error("The selected student is not available.", 404);
+      }
+
+      if (cleanChest(verificationStudent.chest_no) !== enteredChest) {
+        return error("Chest number does not match this student.", 403);
+      }
+
+      const fullResponse = await loadStudentProgrammes(
+        organizationId,
+        eventId,
+        studentId,
+        classId,
+        gender,
+        resolved.event.eventInfo,
+        resolved.event.organization,
+        true,
+      );
+
+      if (!fullResponse.ok) return fullResponse;
+
+      const payload = await fullResponse.json();
+      const certificate = (payload?.certificates || []).find(
+        (item: any) => String(item?.id || "") === certificateId,
+      );
+
+      if (!certificate) {
+        return error("This certificate is not available for download.", 404);
+      }
+
+      return NextResponse.json({
+        success: true,
+        certificate,
+        certificateSettings: payload?.certificateSettings || null,
       });
     }
 
@@ -994,6 +1165,7 @@ export async function POST(
         gender,
         resolved.event.eventInfo,
         resolved.event.organization,
+        false,
       );
     }
 

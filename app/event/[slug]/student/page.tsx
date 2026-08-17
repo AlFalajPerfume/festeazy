@@ -22,6 +22,10 @@ import {
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
+  CUSTOM_FONT_FACE_CSS,
+  GOOGLE_FONT_STYLESHEET_URL,
+} from "@/app/fonts";
+import {
   useEffect,
   useMemo,
   useState,
@@ -60,7 +64,6 @@ type EventSettings = {
 
 type LookupStudent = {
   id: string;
-  chestNo: string;
   name: string;
   gender: string;
   categoryName: string;
@@ -102,7 +105,7 @@ type LookupCertificate = {
   positionLabel: string;
   grade: string;
   publishedAt: string | null;
-  messageText: string;
+  messageText?: string;
 };
 
 type CertificateDownloadSettings = {
@@ -116,6 +119,14 @@ type CertificateDownloadSettings = {
   textAlign: "left" | "center" | "right";
   fontFamily: string;
   eligiblePositions: number[];
+  studentNameXmm: number;
+  studentNameYmm: number;
+  studentNameWidthMm: number;
+  studentNameFontSizePt: number;
+  studentNameLineHeight: number;
+  studentNameTextColor: string;
+  studentNameTextAlign: "left" | "center" | "right";
+  studentNameFontFamily: string;
 };
 
 type LookupResponse = {
@@ -123,7 +134,7 @@ type LookupResponse = {
   student: LookupStudent;
   programmes: LookupProgramme[];
   certificates: LookupCertificate[];
-  certificateSettings: CertificateDownloadSettings;
+  certificateSettings?: CertificateDownloadSettings | null;
 };
 
 type NamedOption = {
@@ -140,7 +151,6 @@ type StudentOption = {
   id: string;
   name: string;
   divisionName: string;
-  chestHint: string;
 };
 
 type Theme = {
@@ -169,6 +179,14 @@ const DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS: CertificateDownloadSettings = {
   textAlign: "center",
   fontFamily: "Arial, Helvetica, sans-serif",
   eligiblePositions: [1, 2],
+  studentNameXmm: 82,
+  studentNameYmm: 73,
+  studentNameWidthMm: 190,
+  studentNameFontSizePt: 31,
+  studentNameLineHeight: 1.05,
+  studentNameTextColor: "#4b5563",
+  studentNameTextAlign: "center",
+  studentNameFontFamily: '"Great Vibes", "Brush Script MT", cursive',
 };
 
 function safeDownloadName(value: unknown) {
@@ -177,6 +195,90 @@ function safeDownloadName(value: unknown) {
     .trim()
     .replace(/\s+/g, "-")
     .toLowerCase();
+}
+
+
+function escapeCertificateHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function certificateRichTextHtml(value: unknown) {
+  return escapeCertificateHtml(value)
+    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br />");
+}
+
+const CERTIFICATE_FONT_LINK_ID = "festeazy-certificate-font-link";
+const CERTIFICATE_CUSTOM_FONT_STYLE_ID = "festeazy-certificate-custom-font-style";
+
+function firstFontFamily(fontFamily: string) {
+  return String(fontFamily || "Arial")
+    .split(",")[0]
+    .trim() || "Arial";
+}
+
+async function ensureCertificateFontsLoaded(
+  studentNameFontFamily: string,
+  studentNameFontSizePx: number,
+  messageFontFamily: string,
+  messageFontSizePx: number,
+) {
+  let customStyle = document.getElementById(
+    CERTIFICATE_CUSTOM_FONT_STYLE_ID,
+  ) as HTMLStyleElement | null;
+
+  if (!customStyle) {
+    customStyle = document.createElement("style");
+    customStyle.id = CERTIFICATE_CUSTOM_FONT_STYLE_ID;
+    customStyle.textContent = CUSTOM_FONT_FACE_CSS;
+    document.head.appendChild(customStyle);
+  }
+
+  let fontLink = document.getElementById(
+    CERTIFICATE_FONT_LINK_ID,
+  ) as HTMLLinkElement | null;
+
+  if (!fontLink) {
+    fontLink = document.createElement("link");
+    fontLink.id = CERTIFICATE_FONT_LINK_ID;
+    fontLink.rel = "stylesheet";
+    fontLink.href = GOOGLE_FONT_STYLESHEET_URL;
+    document.head.appendChild(fontLink);
+
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      fontLink!.addEventListener("load", done, { once: true });
+      fontLink!.addEventListener("error", done, { once: true });
+      window.setTimeout(done, 2500);
+    });
+  }
+
+  if ("fonts" in document) {
+    try {
+      const studentFont = firstFontFamily(studentNameFontFamily);
+      const messageFont = firstFontFamily(messageFontFamily);
+
+      await Promise.all([
+        (document as any).fonts.load(
+          `400 ${Math.max(8, studentNameFontSizePx)}px ${studentFont}`,
+        ),
+        (document as any).fonts.load(
+          `400 ${Math.max(8, messageFontSizePx)}px ${messageFont}`,
+        ),
+        (document as any).fonts.load(
+          `700 ${Math.max(8, messageFontSizePx)}px ${messageFont}`,
+        ),
+      ]);
+      await (document as any).fonts.ready;
+    } catch {
+      // Continue with the best available fallback font.
+    }
+  }
 }
 
 function normalizeText(value: unknown) {
@@ -357,6 +459,11 @@ export default function ParentStudentProgrammeLookupPage() {
   const [certificateSettings, setCertificateSettings] =
     useState<CertificateDownloadSettings>(DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS);
   const [downloadingCertificateId, setDownloadingCertificateId] = useState("");
+  const [certificateToVerify, setCertificateToVerify] =
+    useState<LookupCertificate | null>(null);
+  const [certificateChestInput, setCertificateChestInput] = useState("");
+  const [certificateVerifyError, setCertificateVerifyError] = useState("");
+  const [isVerifyingCertificate, setIsVerifyingCertificate] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
@@ -555,10 +662,10 @@ export default function ParentStudentProgrammeLookupPage() {
       setStudent(payload.student);
       setProgrammes(payload.programmes || []);
       setCertificates(payload.certificates || []);
-      setCertificateSettings({
-        ...DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS,
-        ...(payload.certificateSettings || {}),
-      });
+      setCertificateSettings(DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS);
+      setCertificateToVerify(null);
+      setCertificateChestInput("");
+      setCertificateVerifyError("");
       setMessage("Student programmes loaded.");
     } catch (error: any) {
       setLookupError(error?.message || "Unable to load this student's programmes.");
@@ -576,6 +683,9 @@ export default function ParentStudentProgrammeLookupPage() {
     setStudent(null);
     setProgrammes([]);
     setCertificates([]);
+    setCertificateToVerify(null);
+    setCertificateChestInput("");
+    setCertificateVerifyError("");
     setLookupError("");
     setMessage("");
     setHasSearched(false);
@@ -586,13 +696,85 @@ export default function ParentStudentProgrammeLookupPage() {
     setStudent(null);
     setProgrammes([]);
     setCertificates([]);
+    setCertificateToVerify(null);
+    setCertificateChestInput("");
+    setCertificateVerifyError("");
     setLookupError("");
     setMessage("");
     setHasSearched(false);
   }
 
-  async function downloadCertificate(certificate: LookupCertificate) {
-    if (!student || !organization || !eventInfo) return;
+  function requestCertificateDownload(certificate: LookupCertificate) {
+    setCertificateToVerify(certificate);
+    setCertificateChestInput("");
+    setCertificateVerifyError("");
+    setLookupError("");
+  }
+
+  async function verifyCertificateAndDownload() {
+    if (
+      !certificateToVerify ||
+      !selectedStudentId ||
+      !selectedClassId ||
+      !selectedGender
+    ) {
+      return;
+    }
+
+    const chestNo = certificateChestInput.trim();
+    if (!chestNo) {
+      setCertificateVerifyError("Enter the chest number to continue.");
+      return;
+    }
+
+    setIsVerifyingCertificate(true);
+    setCertificateVerifyError("");
+
+    try {
+      const payload = await lookupRequest({
+        action: "certificate",
+        classId: selectedClassId,
+        gender: selectedGender,
+        studentId: selectedStudentId,
+        certificateId: certificateToVerify.id,
+        chestNo,
+      });
+
+      const verifiedCertificate = payload?.certificate as
+        | LookupCertificate
+        | undefined;
+      const verifiedSettings = payload?.certificateSettings as
+        | CertificateDownloadSettings
+        | undefined;
+
+      if (!verifiedCertificate || !verifiedSettings?.templateUrl) {
+        throw new Error("Certificate is not available for download.");
+      }
+
+      setCertificateSettings({
+        ...DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS,
+        ...verifiedSettings,
+      });
+      setCertificateToVerify(null);
+      setCertificateChestInput("");
+      await downloadCertificate(verifiedCertificate, {
+        ...DEFAULT_CERTIFICATE_DOWNLOAD_SETTINGS,
+        ...verifiedSettings,
+      });
+    } catch (error: any) {
+      setCertificateVerifyError(
+        error?.message || "Unable to verify the chest number.",
+      );
+    } finally {
+      setIsVerifyingCertificate(false);
+    }
+  }
+
+  async function downloadCertificate(
+    certificate: LookupCertificate,
+    verifiedSettings: CertificateDownloadSettings,
+  ) {
+    if (!student || !organization || !eventInfo || !certificate.messageText) return;
 
     setDownloadingCertificateId(certificate.id);
     setLookupError("");
@@ -606,6 +788,17 @@ export default function ParentStudentProgrammeLookupPage() {
       const widthPx = 1123;
       const heightPx = 794;
       const pxPerMm = widthPx / 297;
+      const pxPerPt = 96 / 72;
+      const studentNameFontSizePx =
+        verifiedSettings.studentNameFontSizePt * pxPerPt;
+      const messageFontSizePx = verifiedSettings.fontSizePt * pxPerPt;
+
+      await ensureCertificateFontsLoaded(
+        verifiedSettings.studentNameFontFamily,
+        studentNameFontSizePx,
+        verifiedSettings.fontFamily,
+        messageFontSizePx,
+      );
 
       const root = document.createElement("div");
       certificateRoot = root;
@@ -616,89 +809,82 @@ export default function ParentStudentProgrammeLookupPage() {
       root.style.height = `${heightPx}px`;
       root.style.background = "#ffffff";
       root.style.overflow = "hidden";
-      root.style.fontFamily = certificateSettings.fontFamily;
+      root.style.fontFamily = verifiedSettings.fontFamily;
       root.style.boxSizing = "border-box";
 
-      if (certificateSettings.templateUrl) {
-        const image = document.createElement("img");
-        image.src = certificateSettings.templateUrl;
-        image.crossOrigin = "anonymous";
-        image.alt = "Certificate template";
-        image.style.position = "absolute";
-        image.style.inset = "0";
-        image.style.width = "100%";
-        image.style.height = "100%";
-        image.style.objectFit = "fill";
-        root.appendChild(image);
+      const certificateStyle = document.createElement("style");
+      certificateStyle.textContent = ".certificate-message-rich strong{font-weight:700;}";
+      root.appendChild(certificateStyle);
 
-        await new Promise<void>((resolve) => {
-          if (image.complete) return resolve();
-          const finish = () => resolve();
-          image.addEventListener("load", finish, { once: true });
-          image.addEventListener("error", finish, { once: true });
-        });
-      } else {
-        const border = document.createElement("div");
-        border.style.position = "absolute";
-        border.style.inset = "34px";
-        border.style.border = `5px solid ${theme.primary}`;
-        border.style.borderRadius = "28px";
-        border.style.boxShadow = `inset 0 0 0 2px ${theme.border}`;
-        root.appendChild(border);
-
-        const brand = document.createElement("div");
-        brand.innerText = organization.name;
-        brand.style.position = "absolute";
-        brand.style.left = "80px";
-        brand.style.right = "80px";
-        brand.style.top = "72px";
-        brand.style.textAlign = "center";
-        brand.style.fontSize = "28px";
-        brand.style.fontWeight = "800";
-        brand.style.letterSpacing = "2px";
-        brand.style.color = theme.dark;
-        root.appendChild(brand);
-
-        const title = document.createElement("div");
-        title.innerText = "CERTIFICATE OF MERIT";
-        title.style.position = "absolute";
-        title.style.left = "80px";
-        title.style.right = "80px";
-        title.style.top = "130px";
-        title.style.textAlign = "center";
-        title.style.fontSize = "52px";
-        title.style.fontWeight = "900";
-        title.style.letterSpacing = "4px";
-        title.style.color = "#0f172a";
-        root.appendChild(title);
-
-        const subtitle = document.createElement("div");
-        subtitle.innerText = `${certificate.positionLabel} • ${certificate.programmeName}`;
-        subtitle.style.position = "absolute";
-        subtitle.style.left = "100px";
-        subtitle.style.right = "100px";
-        subtitle.style.bottom = "84px";
-        subtitle.style.textAlign = "center";
-        subtitle.style.fontSize = "20px";
-        subtitle.style.fontWeight = "800";
-        subtitle.style.color = theme.primary;
-        root.appendChild(subtitle);
+      if (!verifiedSettings.templateUrl) {
+        throw new Error(
+          "Certificate template is not available yet. Please contact the event administrator.",
+        );
       }
 
+      const image = document.createElement("img");
+      image.src = verifiedSettings.templateUrl;
+      image.crossOrigin = "anonymous";
+      image.alt = "Certificate template";
+      image.style.position = "absolute";
+      image.style.inset = "0";
+      image.style.width = "100%";
+      image.style.height = "100%";
+      image.style.objectFit = "fill";
+      image.style.zIndex = "0";
+      root.appendChild(image);
+
+      await new Promise<void>((resolve, reject) => {
+        if (image.complete && image.naturalWidth > 0) return resolve();
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener(
+          "error",
+          () => reject(new Error("Unable to load the certificate template.")),
+          { once: true },
+        );
+      });
+
+      const studentNameBox = document.createElement("div");
+      studentNameBox.innerText = student.name;
+      studentNameBox.style.position = "absolute";
+      studentNameBox.style.left = `${verifiedSettings.studentNameXmm * pxPerMm}px`;
+      studentNameBox.style.top = `${verifiedSettings.studentNameYmm * pxPerMm}px`;
+      studentNameBox.style.width = `${verifiedSettings.studentNameWidthMm * pxPerMm}px`;
+      studentNameBox.style.whiteSpace = "normal";
+      studentNameBox.style.overflowWrap = "anywhere";
+      studentNameBox.style.textAlign = verifiedSettings.studentNameTextAlign;
+      studentNameBox.style.fontFamily = verifiedSettings.studentNameFontFamily;
+      studentNameBox.style.fontSize = `${studentNameFontSizePx}px`;
+      studentNameBox.style.lineHeight = String(
+        verifiedSettings.studentNameLineHeight,
+      );
+      studentNameBox.style.fontWeight = "400";
+      studentNameBox.style.color = verifiedSettings.studentNameTextColor;
+      studentNameBox.style.boxSizing = "border-box";
+      studentNameBox.style.zIndex = "2";
+      studentNameBox.style.textRendering = "geometricPrecision";
+      root.appendChild(studentNameBox);
+
       const messageBox = document.createElement("div");
-      messageBox.innerText = certificate.messageText;
+      messageBox.className = "certificate-message-rich";
+      messageBox.innerHTML = certificateRichTextHtml(certificate.messageText);
       messageBox.style.position = "absolute";
-      messageBox.style.left = `${certificateSettings.textXmm * pxPerMm}px`;
-      messageBox.style.top = `${certificateSettings.textYmm * pxPerMm}px`;
-      messageBox.style.width = `${certificateSettings.textWidthMm * pxPerMm}px`;
+      messageBox.style.left = `${verifiedSettings.textXmm * pxPerMm}px`;
+      messageBox.style.top = `${verifiedSettings.textYmm * pxPerMm}px`;
+      messageBox.style.width = `${verifiedSettings.textWidthMm * pxPerMm}px`;
       messageBox.style.whiteSpace = "pre-wrap";
-      messageBox.style.textAlign = certificateSettings.textAlign;
-      messageBox.style.fontFamily = certificateSettings.fontFamily;
-      messageBox.style.fontSize = `${certificateSettings.fontSizePt * 1.333}px`;
-      messageBox.style.lineHeight = String(certificateSettings.lineHeight);
-      messageBox.style.fontWeight = "600";
-      messageBox.style.color = certificateSettings.textColor;
+      messageBox.style.textAlign = verifiedSettings.textAlign;
+      messageBox.style.fontFamily = verifiedSettings.fontFamily;
+      messageBox.style.fontSize = `${messageFontSizePx}px`;
+      messageBox.style.lineHeight = String(verifiedSettings.lineHeight);
+      // Keep digital Student Lookup certificates visually identical to the
+      // Admin pre-printed certificate output. The admin print layout uses
+      // normal font weight, so do not artificially bold the public download.
+      messageBox.style.fontWeight = "400";
+      messageBox.style.color = verifiedSettings.textColor;
       messageBox.style.boxSizing = "border-box";
+      messageBox.style.zIndex = "2";
+      messageBox.style.textRendering = "geometricPrecision";
       root.appendChild(messageBox);
 
       document.body.appendChild(root);
@@ -710,6 +896,13 @@ export default function ParentStudentProgrammeLookupPage() {
           // Continue with the available font.
         }
       }
+
+      // Give the browser two paint frames after the remote/custom fonts and
+      // positioned layers are ready. This prevents html2canvas from dropping
+      // the script student-name layer on some browsers.
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
 
       const canvas = await html2canvas(root, {
         scale: 2,
@@ -1052,9 +1245,6 @@ export default function ParentStudentProgrammeLookupPage() {
                           <BadgeCheck size={12} /> Verified
                         </span>
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-600">
-                          Chest #{cleanChest(student.chestNo)}
-                        </span>
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-600">
                           {formatGender(student.gender)}
                         </span>
                       </div>
@@ -1107,7 +1297,7 @@ export default function ParentStudentProgrammeLookupPage() {
               </div>
             </section>
 
-            {Boolean(certificateSettings.templateUrl) && certificates.length > 0 && (
+            {certificates.length > 0 && (
               <section className="lookup-no-print overflow-hidden rounded-[2rem] border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 shadow-lg sm:p-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
@@ -1157,7 +1347,7 @@ export default function ParentStudentProgrammeLookupPage() {
 
                       <button
                         type="button"
-                        onClick={() => void downloadCertificate(certificate)}
+                        onClick={() => requestCertificateDownload(certificate)}
                         disabled={Boolean(downloadingCertificateId)}
                         className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
@@ -1271,6 +1461,105 @@ export default function ParentStudentProgrammeLookupPage() {
           <p className="mt-2 text-xs font-semibold text-slate-400">Make Your Fest Easy</p>
         </footer>
       </div>
+
+      {certificateToVerify && (
+        <div className="lookup-no-print fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-[2rem] border border-white/20 bg-white shadow-2xl">
+            <div className="border-b border-slate-100 px-6 py-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-600">
+                    Certificate Verification
+                  </p>
+                  <h2 className="mt-1 text-xl font-black tracking-[-0.04em] text-slate-950">
+                    Verify Student
+                  </h2>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                    Enter your chest number to download the {certificateToVerify.programmeName} certificate.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isVerifyingCertificate) return;
+                    setCertificateToVerify(null);
+                    setCertificateChestInput("");
+                    setCertificateVerifyError("");
+                  }}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg font-black text-slate-500 transition hover:bg-slate-200"
+                  aria-label="Close certificate verification"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <form
+              className="p-6"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void verifyCertificateAndDownload();
+              }}
+            >
+              <label className="block">
+                <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                  Chest Number
+                </span>
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={certificateChestInput}
+                  onChange={(event) => {
+                    setCertificateChestInput(event.target.value);
+                    setCertificateVerifyError("");
+                  }}
+                  placeholder="Enter chest number"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-base font-black tracking-wide text-slate-950 outline-none transition focus:border-amber-400 focus:bg-white focus:ring-4 focus:ring-amber-100"
+                />
+              </label>
+
+              {certificateVerifyError && (
+                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-bold text-red-700">
+                  {certificateVerifyError}
+                </div>
+              )}
+
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={isVerifyingCertificate}
+                  onClick={() => {
+                    setCertificateToVerify(null);
+                    setCertificateChestInput("");
+                    setCertificateVerifyError("");
+                  }}
+                  className="h-12 rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVerifyingCertificate || !certificateChestInput.trim()}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isVerifyingCertificate ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <BadgeCheck size={16} />
+                  )}
+                  Verify & Download
+                </button>
+              </div>
+
+              <p className="mt-4 text-center text-[11px] font-semibold leading-5 text-slate-400">
+                Your chest number is used only to verify this certificate download.
+              </p>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -1338,23 +1627,10 @@ function SearchableStudentField({
   const selectedStudent =
     students.find((student) => student.id === value) || null;
 
-  function getStudentChest(student: StudentOption) {
-    // The public lookup API now returns the complete chest number in chestHint.
-    // Never guess a chest number from the beginning of the student's name.
-    const chest = cleanChest(student.chestHint);
-    return chest && chest !== "-" ? chest : "";
-  }
-
   function getStudentDisplayName(student: StudentOption) {
     return String(student.name || "Student").trim();
   }
 
-  function chestBadgeWidth(chest: string) {
-    // Keep short chest numbers compact but allow 3, 4, 5+ digit numbers
-    // to expand without clipping.
-    const digits = Math.max(1, chest.length);
-    return Math.max(48, Math.min(112, 28 + digits * 10));
-  }
 
   const filteredStudents = useMemo(() => {
     const keyword = normalizeText(query);
@@ -1364,8 +1640,6 @@ function SearchableStudentField({
     return students.filter((student) => {
       const searchableText = [
         student.name,
-        student.chestHint,
-        getStudentChest(student),
         getStudentDisplayName(student),
         student.divisionName,
       ]
@@ -1417,16 +1691,11 @@ function SearchableStudentField({
               <p className="truncate text-sm font-black text-slate-950">
                 {getStudentDisplayName(selectedStudent)}
               </p>
-              <p className="mt-0.5 truncate text-[10px] font-bold text-slate-400">
-                {[
-                  getStudentChest(selectedStudent)
-                    ? `Chest #${getStudentChest(selectedStudent)}`
-                    : "",
-                  selectedStudent.divisionName || "",
-                ]
-                  .filter(Boolean)
-                  .join(" • ")}
-              </p>
+              {selectedStudent.divisionName && (
+                <p className="mt-0.5 truncate text-[10px] font-bold text-slate-400">
+                  {selectedStudent.divisionName}
+                </p>
+              )}
             </>
           ) : (
             <p className="truncate text-sm font-black text-slate-500">
@@ -1456,7 +1725,7 @@ function SearchableStudentField({
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search name, chest no or division..."
+                placeholder="Search student name or division..."
                 className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm font-bold text-slate-950 outline-none transition focus:border-[var(--lookup-primary)] focus:bg-white focus:ring-4 focus:ring-[var(--lookup-soft)]"
               />
             </div>
@@ -1470,13 +1739,12 @@ function SearchableStudentField({
                   No student found
                 </p>
                 <p className="mt-1 text-xs font-semibold text-slate-400">
-                  Try another name or chest number.
+                  Try another student name or division.
                 </p>
               </div>
             ) : (
               filteredStudents.map((student) => {
                 const selected = student.id === value;
-                const chest = getStudentChest(student);
                 const displayName = getStudentDisplayName(student);
 
                 return (
@@ -1496,31 +1764,24 @@ function SearchableStudentField({
                     }`}
                   >
                     <div
-                      className="flex h-11 shrink-0 items-center justify-center rounded-xl px-2 text-xs font-black tabular-nums"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
                       style={{
-                        width: `${chestBadgeWidth(chest)}px`,
-                        background: selected
-                          ? "var(--lookup-primary)"
-                          : "#f1f5f9",
+                        background: selected ? "var(--lookup-primary)" : "#f1f5f9",
                         color: selected ? "white" : "#64748b",
                       }}
-                      title={chest ? `Chest #${chest}` : "Chest number unavailable"}
                     >
-                      {chest || "—"}
+                      <User size={18} />
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-black text-slate-950">
                         {displayName}
                       </p>
-                      <p className="mt-1 truncate text-[11px] font-bold text-slate-400">
-                        {[
-                          chest ? `Chest #${chest}` : "",
-                          student.divisionName || "",
-                        ]
-                          .filter(Boolean)
-                          .join(" • ")}
-                      </p>
+                      {student.divisionName && (
+                        <p className="mt-1 truncate text-[11px] font-bold text-slate-400">
+                          {student.divisionName}
+                        </p>
+                      )}
                     </div>
 
                     {selected && (
