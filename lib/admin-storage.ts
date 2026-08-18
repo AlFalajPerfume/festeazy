@@ -7,6 +7,7 @@ export type AdminStorageAssetType =
   | "poster_template"
   | "poster_ad_banner"
   | "milestone_template"
+  | "milestone_logo"
   | "certificate_preview"
   | "gallery_image";
 

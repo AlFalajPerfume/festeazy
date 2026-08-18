@@ -2,6 +2,10 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import MilestonePosterCanvas, {
+  normalizeMilestoneLayout,
+  renderMilestonePosterToCanvas,
+} from "@/components/MilestonePosterCanvas";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { loadPublicResultParticipants } from "@/lib/public-result-participants";
 import {
@@ -615,6 +619,7 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
     useState<ResultPosterLock[]>([]);
   const [selectedPosterTemplateId, setSelectedPosterTemplateId] = useState("");
   const [milestonePosters, setMilestonePosters] = useState<MilestonePoster[]>([]);
+  const [milestoneTemplates, setMilestoneTemplates] = useState<PosterTemplate[]>([]);
 
   const [search, setSearch] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
@@ -1025,7 +1030,7 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
       const shouldLoadPosters = loadedSettings.show_posters !== false;
       const shouldLoadGallery = loadedSettings.show_gallery !== false;
 
-      const [templateRes, galleryRes, milestoneRes, posterLockRes] =
+      const [templateRes, milestoneTemplateRes, galleryRes, milestoneRes, posterLockRes] =
         await Promise.all([
           shouldLoadPosters
             ? supabase
@@ -1036,6 +1041,17 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
                 .order("is_active", { ascending: false })
                 .order("created_at", { ascending: false })
                 .limit(3)
+            : Promise.resolve({ data: [], error: null }),
+
+          shouldLoadPosters
+            ? supabase
+                .from("poster_templates")
+                .select("*")
+                .eq("event_id", activeEvent.id)
+                .eq("template_usage", "milestone_poster")
+                .order("is_active", { ascending: false })
+                .order("sort_order", { ascending: true })
+                .order("created_at", { ascending: false })
             : Promise.resolve({ data: [], error: null }),
 
           shouldLoadGallery
@@ -1088,6 +1104,16 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
           null;
 
         setSelectedPosterTemplateId(defaultTemplate?.id || "");
+      }
+
+      if (milestoneTemplateRes.error) {
+        console.warn(
+          "Milestone template loading skipped:",
+          milestoneTemplateRes.error.message,
+        );
+        setMilestoneTemplates([]);
+      } else {
+        setMilestoneTemplates((milestoneTemplateRes.data || []) as PosterTemplate[]);
       }
 
       if (galleryRes.error) {
@@ -2323,7 +2349,7 @@ ${publicUrl}`;
       )}
 
 
-      {showPoints && milestonePosters.length > 0 && (
+      {showPosters && milestonePosters.length > 0 && (
         <section id="milestone-posters" className="px-4 py-10 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <SectionHeader
@@ -2334,10 +2360,25 @@ ${publicUrl}`;
               side={`${milestonePosters.length} posters`}
             />
 
-            <div className="mt-7 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {milestonePosters.map((poster) => (
-                <MilestonePosterCard key={poster.id} poster={poster} />
-              ))}
+            <div className="mt-7 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {milestonePosters.map((poster) => {
+                const template =
+                  milestoneTemplates.find((item) => item.id === poster.template_id) ||
+                  milestoneTemplates.find((item) => item.is_active) ||
+                  milestoneTemplates[0] ||
+                  null;
+
+                return (
+                  <MilestonePosterCard
+                    key={poster.id}
+                    poster={poster}
+                    template={template}
+                    organizationName={organization?.name || "Organization"}
+                    organizationLogoUrl={organization?.logo_url || null}
+                    eventTitle={eventInfo?.title || "Event"}
+                  />
+                );
+              })}
             </div>
           </div>
         </section>
@@ -2997,19 +3038,82 @@ function PosterPreviewModal({
   );
 }
 
-function MilestonePosterCard({ poster }: { poster: MilestonePoster }) {
+function MilestonePosterCard({
+  poster,
+  template,
+  organizationName,
+  organizationLogoUrl,
+  eventTitle,
+}: {
+  poster: MilestonePoster;
+  template: PosterTemplate | null;
+  organizationName: string;
+  organizationLogoUrl?: string | null;
+  eventTitle: string;
+}) {
   const rows = Array.isArray(poster.leaderboard_snapshot)
     ? poster.leaderboard_snapshot
     : [];
 
-  const visibleRows = rows.slice(0, 8);
+  const visibleRows = rows.slice(0, 9);
+  const width = Number(template?.canvas_width || 1080);
+  const height = Number(template?.canvas_height || 1350);
+  const scale = Math.min(0.39, 390 / Math.max(1, width));
+  const layout = normalizeMilestoneLayout(template?.layout, width, height);
+  const [isDownloadingMilestone, setIsDownloadingMilestone] = useState(false);
+
+  async function downloadMilestone() {
+    if (isDownloadingMilestone) return;
+
+    setIsDownloadingMilestone(true);
+
+    try {
+      const canvas = await renderMilestonePosterToCanvas({
+        width,
+        height,
+        backgroundUrl: template?.image_url || null,
+        organizationName,
+        organizationLogoUrl: organizationLogoUrl || null,
+        eventTitle,
+        milestoneCount: poster.milestone_count,
+        publishedResultCount: poster.published_result_count,
+        rows: visibleRows,
+        layout,
+        pixelRatio: 2,
+      });
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) resolve(value);
+          else reject(new Error("Unable to prepare poster PNG."));
+        }, "image/png");
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `${eventTitle || "event"}-after-${poster.milestone_count}-points-poster.png`
+        .toLowerCase()
+        .replace(/[^a-z0-9.]+/g, "-")
+        .replace(/-+/g, "-");
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+    } catch (error) {
+      console.error(error);
+      alert("Poster download failed. Please try again.");
+    } finally {
+      setIsDownloadingMilestone(false);
+    }
+  }
 
   function shareMilestone() {
     const lines = visibleRows
       .map((team, index) => `${index + 1}. ${team.teamName} - ${team.points}`)
       .join("\n");
 
-    const text = `${poster.title || `After ${poster.milestone_count}`} Results\n\n${lines}\n\nPowered by FestEazy`;
+    const text = `${poster.title || `After ${poster.milestone_count}`} Results\n\n${lines}`;
 
     if (navigator.share) {
       navigator
@@ -3025,74 +3129,91 @@ function MilestonePosterCard({ poster }: { poster: MilestonePoster }) {
   }
 
   return (
-    <article className="relative overflow-hidden rounded-[2rem] border border-violet-200 bg-gradient-to-br from-[#3b0b4f] via-[#8b0f78] to-[#26002f] p-6 text-white shadow-2xl shadow-violet-950/20">
-      <div className="absolute -left-16 top-10 h-36 w-36 rounded-full bg-pink-300/20 blur-3xl" />
-      <div className="absolute -right-16 bottom-8 h-44 w-44 rounded-full bg-violet-300/20 blur-3xl" />
-
-      <div className="relative">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-white/55">
-              Official Points Poster
-            </p>
-
-            <h3 className="mt-3 text-5xl font-light tracking-[-0.08em] sm:text-6xl">
-              After <span className="font-black">{poster.milestone_count}</span>
-            </h3>
-
-            <p className="mt-2 text-sm font-bold text-white/60">
-              {poster.published_result_count} published results counted
-            </p>
-          </div>
-
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-2xl shadow-lg shadow-black/10">
-            🏆
-          </div>
+    <article className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-900/5">
+      <div className="flex justify-center overflow-hidden bg-slate-100 p-3 sm:p-4">
+        <div className="overflow-hidden rounded-[1.35rem] bg-white shadow-xl shadow-slate-900/15">
+          <MilestonePosterCanvas
+            width={width}
+            height={height}
+            backgroundUrl={template?.image_url || null}
+            backgroundAlt={template?.name || "Milestone poster"}
+            organizationName={organizationName}
+            organizationLogoUrl={organizationLogoUrl || null}
+            eventTitle={eventTitle}
+            milestoneCount={poster.milestone_count}
+            publishedResultCount={poster.published_result_count}
+            rows={visibleRows}
+            scale={scale}
+            layout={layout}
+          />
         </div>
+      </div>
 
-        <div className="mt-8 space-y-3">
-          {visibleRows.length === 0 ? (
-            <p className="rounded-2xl bg-white/10 p-4 text-sm font-bold text-white/70">
-              No points available.
-            </p>
-          ) : (
-            visibleRows.map((team, index) => (
-              <div
-                key={team.teamId || team.teamName || index}
-                className="grid grid-cols-[42px_1fr_auto] items-center gap-3"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-xs font-black text-white/70">
-                  {index + 1}
-                </span>
-
-                <p className="truncate text-xl font-light tracking-[-0.04em]">
-                  {team.teamName}
-                </p>
-
-                <p className="text-2xl font-black tracking-[-0.06em]">
-                  {team.points}
-                </p>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="mt-8 flex items-center justify-between gap-3 border-t border-white/10 pt-4">
-          <p className="text-xs font-black uppercase tracking-[0.2em] text-white/45">
-            Powered by FestEazy
+      <div className="flex items-center justify-between gap-4 border-t border-slate-100 px-5 py-4">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+            Official Points Snapshot
           </p>
+          <p className="mt-1 truncate text-sm font-black text-slate-800">
+            After {poster.milestone_count} published programmes
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={downloadMilestone}
+            disabled={isDownloadingMilestone}
+            className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isDownloadingMilestone ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Download size={15} />
+            )}
+            <span className="hidden sm:inline">
+              {isDownloadingMilestone ? "Preparing..." : "Download"}
+            </span>
+          </button>
 
           <button
             type="button"
             onClick={shareMilestone}
-            className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white transition hover:bg-white/15"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 transition hover:bg-slate-50"
           >
             <Share2 size={15} />
-            Share
+            <span className="hidden sm:inline">Share</span>
           </button>
         </div>
       </div>
+
     </article>
+  );
+}
+
+async function waitForMilestoneImages(root: HTMLElement) {
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
+  if (typeof document !== "undefined" && "fonts" in document) {
+    try {
+      await (document as any).fonts.ready;
+    } catch {}
+  }
+
+  const images = Array.from(root.querySelectorAll("img"));
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise((resolve) => {
+          if (image.complete) {
+            resolve(true);
+            return;
+          }
+          image.onload = () => resolve(true);
+          image.onerror = () => resolve(true);
+        }),
+    ),
   );
 }
 

@@ -178,6 +178,47 @@ type PreviewPageFormat = ChestPaperFormat;
 type ChestImageFit = "cover" | "contain";
 type RegistrationSheetMode = "blank" | "filled";
 
+type ChestTextElement =
+  | "organization"
+  | "event"
+  | "chestLabel"
+  | "chestNumber"
+  | "studentName"
+  | "details"
+  | "division"
+  | "team";
+
+type ChestTextPosition = {
+  x: number;
+  y: number;
+};
+
+type ChestTextLayout = Record<ChestTextElement, ChestTextPosition>;
+
+const DEFAULT_CHEST_TEXT_LAYOUT: ChestTextLayout = {
+  organization: { x: 0, y: 0 },
+  event: { x: 0, y: 0 },
+  chestLabel: { x: 0, y: 0 },
+  chestNumber: { x: 0, y: 0 },
+  studentName: { x: 0, y: 0 },
+  details: { x: 0, y: 0 },
+  division: { x: 0, y: 0 },
+  team: { x: 0, y: 0 },
+};
+
+function createDefaultChestTextLayout(): ChestTextLayout {
+  return {
+    organization: { ...DEFAULT_CHEST_TEXT_LAYOUT.organization },
+    event: { ...DEFAULT_CHEST_TEXT_LAYOUT.event },
+    chestLabel: { ...DEFAULT_CHEST_TEXT_LAYOUT.chestLabel },
+    chestNumber: { ...DEFAULT_CHEST_TEXT_LAYOUT.chestNumber },
+    studentName: { ...DEFAULT_CHEST_TEXT_LAYOUT.studentName },
+    details: { ...DEFAULT_CHEST_TEXT_LAYOUT.details },
+    division: { ...DEFAULT_CHEST_TEXT_LAYOUT.division },
+    team: { ...DEFAULT_CHEST_TEXT_LAYOUT.team },
+  };
+}
+
 type ParticipantEntry = {
   key: string;
   programmeId: string | null;
@@ -484,6 +525,10 @@ export default function ReportsPage() {
   const [showEntryFormDivision, setShowEntryFormDivision] = useState(false);
   const [showEntryFormChestNo, setShowEntryFormChestNo] = useState(false);
   const [showChestCardDivision, setShowChestCardDivision] = useState(false);
+  const [chestTextDragEnabled, setChestTextDragEnabled] = useState(false);
+  const [chestTextLayout, setChestTextLayout] = useState<ChestTextLayout>(
+    createDefaultChestTextLayout,
+  );
   const [compactMode, setCompactMode] = useState(false);
   const [chestPaperFormat, setChestPaperFormat] =
     useState<ChestPaperFormat>("a3-landscape");
@@ -1685,6 +1730,20 @@ export default function ReportsPage() {
     genderFilter,
     teamFilter,
   ]);
+
+  function updateChestTextPosition(
+    element: ChestTextElement,
+    position: ChestTextPosition,
+  ) {
+    setChestTextLayout((current) => ({
+      ...current,
+      [element]: position,
+    }));
+  }
+
+  function resetChestTextPositions() {
+    setChestTextLayout(createDefaultChestTextLayout());
+  }
 
   async function loadData(forceRefresh = false) {
     setIsLoading(true);
@@ -3291,6 +3350,34 @@ export default function ReportsPage() {
           }
         }
 
+        .chest-draggable-text {
+          position: relative;
+          z-index: 30;
+          border-radius: 4px;
+          transition:
+            outline-color 120ms ease,
+            background-color 120ms ease;
+        }
+
+        @media screen {
+          .chest-draggable-text:hover {
+            outline: 2px dashed rgb(124 58 237 / 0.75);
+            outline-offset: 2px;
+            background-color: rgb(255 255 255 / 0.2);
+          }
+
+          .chest-draggable-text:active {
+            outline: 2px solid rgb(124 58 237 / 0.9);
+          }
+        }
+
+        @media print {
+          .chest-draggable-text {
+            outline: none !important;
+            background: transparent !important;
+          }
+        }
+
         .festeazy-chest-card {
           position: relative;
           overflow: hidden;
@@ -3843,6 +3930,54 @@ export default function ReportsPage() {
                       <p className="mt-2 text-[11px] font-bold leading-4 text-slate-400">
                         Off by default. Enable only when your event uses class divisions.
                       </p>
+                    </div>
+                  )}
+
+                  {reportType === "chest_cards" && (
+                    <div className="md:col-span-2 xl:col-span-3">
+                      <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-black text-slate-950">
+                              Drag Text Layout
+                            </p>
+                            <p className="mt-1 max-w-2xl text-xs font-bold leading-5 text-slate-500">
+                              Turn on dragging, then move any text directly on a chest card in the preview.
+                              The same position is applied to every printed card. This changes text position only.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="inline-flex h-11 cursor-pointer items-center gap-3 rounded-xl border border-violet-200 bg-white px-4 text-sm font-black text-violet-700 shadow-sm">
+                              <input
+                                type="checkbox"
+                                checked={chestTextDragEnabled}
+                                onChange={(event) =>
+                                  setChestTextDragEnabled(event.target.checked)
+                                }
+                                className="h-5 w-5 accent-violet-600"
+                              />
+                              Enable Drag
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={resetChestTextPositions}
+                              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+                            >
+                              <RotateCcw size={15} />
+                              Reset Positions
+                            </button>
+                          </div>
+                        </div>
+
+                        {chestTextDragEnabled && (
+                          <div className="mt-3 rounded-xl border border-violet-200 bg-white px-3 py-2 text-[11px] font-bold leading-5 text-violet-700">
+                            Drag organization name, event title, “Chest No”, chest number, student name,
+                            category/class, division and team text. You can drag on any card; all cards update together.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -4437,6 +4572,9 @@ export default function ReportsPage() {
                       encouragementGiftRows={encouragementGiftRows}
                       showEncouragementDivision={showEncouragementDivision}
                       showChestCardDivision={showChestCardDivision}
+                      chestTextDragEnabled={chestTextDragEnabled}
+                      chestTextLayout={chestTextLayout}
+                      onChestTextPositionChange={updateChestTextPosition}
                       resultRows={resultRows}
                       teamPoints={teamPoints}
                       topScorerRows={topScorerRows}
@@ -5289,6 +5427,9 @@ function ReportBody(props: any) {
     encouragementGiftRows,
     showEncouragementDivision,
     showChestCardDivision,
+    chestTextDragEnabled,
+    chestTextLayout,
+    onChestTextPositionChange,
     resultRows,
     teamPoints,
     topScorerRows,
@@ -5410,6 +5551,9 @@ function ReportBody(props: any) {
         getDivisionName={getDivisionName}
         getTeamName={getTeamName}
         showDivision={showChestCardDivision}
+        dragEnabled={chestTextDragEnabled}
+        textLayout={chestTextLayout}
+        onTextPositionChange={onChestTextPositionChange}
         cleanChest={cleanChest}
       />
     );
@@ -6091,6 +6235,9 @@ function ChestCardsReport({
   getDivisionName,
   getTeamName,
   showDivision,
+  dragEnabled,
+  textLayout,
+  onTextPositionChange,
   cleanChest,
 }: {
   students: Student[];
@@ -6115,6 +6262,12 @@ function ChestCardsReport({
   getDivisionName: (id: string | null) => string;
   getTeamName: (id: string | null) => string;
   showDivision: boolean;
+  dragEnabled: boolean;
+  textLayout: ChestTextLayout;
+  onTextPositionChange: (
+    element: ChestTextElement,
+    position: ChestTextPosition,
+  ) => void;
   cleanChest: (value: string | null) => string;
 }) {
   const layout = calculateChestCardLayout(
@@ -6169,6 +6322,119 @@ function ChestCardsReport({
     gradientAngle,
     gradientBalance,
   );
+
+  const dragStateRef = useRef<{
+    element: ChestTextElement;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startPosition: ChestTextPosition;
+    mmPerPixelX: number;
+    mmPerPixelY: number;
+  } | null>(null);
+
+  function getTextPosition(element: ChestTextElement) {
+    return textLayout?.[element] || DEFAULT_CHEST_TEXT_LAYOUT[element];
+  }
+
+  function getTextDragStyle(element: ChestTextElement) {
+    const position = getTextPosition(element);
+
+    return {
+      transform: `translate(${position.x}mm, ${position.y}mm)`,
+      touchAction: dragEnabled ? "none" : undefined,
+      cursor: dragEnabled ? "move" : undefined,
+      userSelect: dragEnabled ? ("none" as const) : undefined,
+    };
+  }
+
+  function startTextDrag(
+    element: ChestTextElement,
+    event: any,
+  ) {
+    if (!dragEnabled) return;
+
+    const card = event.currentTarget.closest(
+      ".festeazy-chest-card",
+    ) as HTMLElement | null;
+
+    if (!card) return;
+
+    const cardRect = card.getBoundingClientRect();
+    if (!cardRect.width || !cardRect.height) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const currentPosition = getTextPosition(element);
+
+    dragStateRef.current = {
+      element,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition: { ...currentPosition },
+      mmPerPixelX: layout.cardWidthMm / cardRect.width,
+      mmPerPixelY: layout.cardHeightMm / cardRect.height,
+    };
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {}
+  }
+
+  function moveTextDrag(event: any) {
+    const drag = dragStateRef.current;
+    if (!dragEnabled || !drag || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+
+    const nextX =
+      drag.startPosition.x +
+      (event.clientX - drag.startClientX) * drag.mmPerPixelX;
+    const nextY =
+      drag.startPosition.y +
+      (event.clientY - drag.startClientY) * drag.mmPerPixelY;
+
+    onTextPositionChange(drag.element, {
+      x: Number(
+        clampNumber(
+          nextX,
+          -layout.cardWidthMm * 0.8,
+          layout.cardWidthMm * 0.8,
+        ).toFixed(2),
+      ),
+      y: Number(
+        clampNumber(
+          nextY,
+          -layout.cardHeightMm * 0.8,
+          layout.cardHeightMm * 0.8,
+        ).toFixed(2),
+      ),
+    });
+  }
+
+  function stopTextDrag(event: any) {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {}
+
+    dragStateRef.current = null;
+  }
+
+  function dragProps(element: ChestTextElement) {
+    return {
+      onPointerDown: (event: any) => startTextDrag(element, event),
+      onPointerMove: moveTextDrag,
+      onPointerUp: stopTextDrag,
+      onPointerCancel: stopTextDrag,
+      style: getTextDragStyle(element),
+      className: dragEnabled ? "chest-draggable-text" : undefined,
+    };
+  }
 
   if (students.length === 0) {
     return (
@@ -6273,14 +6539,26 @@ function ChestCardsReport({
                     )}
                     <div className="min-w-0 flex-1">
                       <p
-                        className="font-black uppercase leading-[1.04] tracking-[0.06em] text-violet-700 [overflow-wrap:anywhere]"
-                        style={{ fontSize: `${organizationFontSize}px` }}
+                        {...dragProps("organization")}
+                        className={`font-black uppercase leading-[1.04] tracking-[0.06em] text-violet-700 [overflow-wrap:anywhere] ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        }`}
+                        style={{
+                          ...getTextDragStyle("organization"),
+                          fontSize: `${organizationFontSize}px`,
+                        }}
                       >
                         {organizationName}
                       </p>
                       <p
-                        className="mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600"
-                        style={{ fontSize: `${eventFontSize}px` }}
+                        {...dragProps("event")}
+                        className={`mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600 ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        }`}
+                        style={{
+                          ...getTextDragStyle("event"),
+                          fontSize: `${eventFontSize}px`,
+                        }}
                       >
                         {eventInfo?.title || "Event"}
                       </p>
@@ -6288,12 +6566,24 @@ function ChestCardsReport({
                   </div>
 
                   <div className="relative z-10 py-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.42em] text-slate-500">
+                    <p
+                      {...dragProps("chestLabel")}
+                      className={`text-[10px] font-black uppercase tracking-[0.42em] text-slate-500 ${
+                        dragEnabled ? "chest-draggable-text" : ""
+                      }`}
+                      style={getTextDragStyle("chestLabel")}
+                    >
                       Chest No
                     </p>
                     <p
-                      className="mt-1 font-black leading-none tracking-[-0.09em] text-slate-950"
-                      style={{ fontSize: `${chestNumberFontSize}px` }}
+                      {...dragProps("chestNumber")}
+                      className={`mt-1 font-black leading-none tracking-[-0.09em] text-slate-950 ${
+                        dragEnabled ? "chest-draggable-text" : ""
+                      }`}
+                      style={{
+                        ...getTextDragStyle("chestNumber"),
+                        fontSize: `${chestNumberFontSize}px`,
+                      }}
                     >
                       {cleanChest(student.chest_no)}
                     </p>
@@ -6306,29 +6596,53 @@ function ChestCardsReport({
                     }}
                   >
                     <p
-                      className="line-clamp-2 min-h-[2.35em] font-black leading-[1.12] tracking-[-0.025em] text-slate-950"
-                      style={{ fontSize: `${participantFontSize}px` }}
+                      {...dragProps("studentName")}
+                      className={`line-clamp-2 min-h-[2.35em] font-black leading-[1.12] tracking-[-0.025em] text-slate-950 ${
+                        dragEnabled ? "chest-draggable-text" : ""
+                      }`}
+                      style={{
+                        ...getTextDragStyle("studentName"),
+                        fontSize: `${participantFontSize}px`,
+                      }}
                     >
                       {student.name}
                     </p>
                     <p
-                      className="mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600"
-                      style={{ fontSize: `${detailFontSize}px` }}
+                      {...dragProps("details")}
+                      className={`mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600 ${
+                        dragEnabled ? "chest-draggable-text" : ""
+                      }`}
+                      style={{
+                        ...getTextDragStyle("details"),
+                        fontSize: `${detailFontSize}px`,
+                      }}
                     >
                       {categoryName} · {className}
                     </p>
                     {showDivision && divisionName !== "-" && (
                       <p
-                        className="mt-1 line-clamp-1 font-extrabold leading-tight text-slate-500"
-                        style={{ fontSize: `${Math.max(8, detailFontSize - 1)}px` }}
+                        {...dragProps("division")}
+                        className={`mt-1 line-clamp-1 font-extrabold leading-tight text-slate-500 ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        }`}
+                        style={{
+                          ...getTextDragStyle("division"),
+                          fontSize: `${Math.max(8, detailFontSize - 1)}px`,
+                        }}
                       >
                         Division: {divisionName}
                       </p>
                     )}
                     <div className="chest-cut-line mt-3 pt-3">
                       <p
-                        className="line-clamp-2 font-black uppercase leading-tight tracking-[0.14em] text-violet-700"
-                        style={{ fontSize: `${teamFontSize}px` }}
+                        {...dragProps("team")}
+                        className={`line-clamp-2 font-black uppercase leading-tight tracking-[0.14em] text-violet-700 ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        }`}
+                        style={{
+                          ...getTextDragStyle("team"),
+                          fontSize: `${teamFontSize}px`,
+                        }}
                       >
                         {teamName}
                       </p>

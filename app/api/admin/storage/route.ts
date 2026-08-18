@@ -43,6 +43,11 @@ const ASSET_RULES = {
     folder: "milestone-templates",
     maxBytes: 12 * 1024 * 1024,
   },
+  milestone_logo: {
+    bucket: "poster-templates",
+    folder: "milestone-logos",
+    maxBytes: 5 * 1024 * 1024,
+  },
   certificate_preview: {
     bucket: "poster-templates",
     folder: "certificate-preview",

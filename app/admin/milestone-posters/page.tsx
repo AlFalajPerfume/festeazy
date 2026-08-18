@@ -2,13 +2,21 @@
 "use client";
 
 import AdminShell from "@/components/admin/AdminShell";
+import MilestonePosterCanvas, {
+  MILESTONE_ELEMENT_LABELS,
+  MilestoneElementKey,
+  MilestonePosterLayout,
+  MilestoneLayerStyle,
+  createDefaultMilestoneLayout,
+  normalizeMilestoneLayout,
+  renderMilestonePosterToCanvas,
+} from "@/components/MilestonePosterCanvas";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import {
   deleteAdminStorageAsset,
   uploadAdminStorageAsset,
 } from "@/lib/admin-storage";
-import html2canvas from "html2canvas";
 import {
   CheckCircle2,
   Download,
@@ -24,7 +32,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type OrganizationUser = {
   id: string;
@@ -38,6 +46,7 @@ type Organization = {
   id: string;
   name: string;
   place: string | null;
+  logo_url: string | null;
 };
 
 type EventInfo = {
@@ -145,7 +154,6 @@ const DEFAULT_MILESTONE_TEMPLATES = [
 ];
 
 export default function MilestonePostersPage() {
-  const captureRef = useRef<HTMLDivElement | null>(null);
 
   const [orgUser, setOrgUser] = useState<OrganizationUser | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
@@ -158,6 +166,11 @@ export default function MilestonePostersPage() {
   const [results, setResults] = useState<ResultItem[]>([]);
 
   const [selectedPoster, setSelectedPoster] = useState<MilestonePoster | null>(null);
+  const [draftLayout, setDraftLayout] = useState<MilestonePosterLayout | null>(null);
+  const [selectedLayoutElement, setSelectedLayoutElement] =
+    useState<MilestoneElementKey>("leaderboard");
+  const [isSavingLayout, setIsSavingLayout] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -316,7 +329,7 @@ export default function MilestonePostersPage() {
       await Promise.all([
         supabase
           .from("organizations")
-          .select("id, name, place")
+          .select("id, name, place, logo_url")
           .eq("id", activeOrgUser.organization_id)
           .maybeSingle(),
 
@@ -365,6 +378,7 @@ export default function MilestonePostersPage() {
     setIsUploading(false);
     setIsGenerating(false);
     setIsDownloading(false);
+    setIsUploadingLogo(false);
   }
 
   function getTemplateForPoster(poster: MilestonePoster | null) {
@@ -736,33 +750,173 @@ export default function MilestonePostersPage() {
     setMessage("Milestone poster deleted.");
   }
 
+  function openPosterPreview(poster: MilestonePoster) {
+    const template = getTemplateForPoster(poster);
+    const width = Number(template?.canvas_width || DEFAULT_POSTER_WIDTH);
+    const height = Number(template?.canvas_height || DEFAULT_POSTER_HEIGHT);
+
+    setDraftLayout(normalizeMilestoneLayout(template?.layout, width, height));
+    setSelectedLayoutElement("leaderboard");
+    setSelectedPoster(poster);
+    setError("");
+  }
+
+  function closePosterPreview() {
+    setSelectedPoster(null);
+    setDraftLayout(null);
+    setSelectedLayoutElement("leaderboard");
+  }
+
+  function updateSelectedLayer(patch: Partial<MilestoneLayerStyle>) {
+    if (!draftLayout) return;
+
+    setDraftLayout({
+      ...draftLayout,
+      elements: {
+        ...draftLayout.elements,
+        [selectedLayoutElement]: {
+          ...draftLayout.elements[selectedLayoutElement],
+          ...patch,
+        },
+      },
+    });
+  }
+
+  function resetSelectedLayout() {
+    if (!selectedPoster) return;
+
+    const template = getTemplateForPoster(selectedPoster);
+    const width = Number(template?.canvas_width || DEFAULT_POSTER_WIDTH);
+    const height = Number(template?.canvas_height || DEFAULT_POSTER_HEIGHT);
+    setDraftLayout(createDefaultMilestoneLayout(width, height));
+    setSelectedLayoutElement("leaderboard");
+  }
+
+  async function uploadCustomMilestoneLogo(file: File) {
+    if (!draftLayout) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Choose a valid image file for the milestone logo.");
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    setError("");
+    setMessage("");
+
+    const previousLogoUrl =
+      draftLayout.elements.logo.logoSource === "custom"
+        ? draftLayout.elements.logo.customLogoUrl || null
+        : null;
+
+    try {
+      const uploadedAsset = await uploadAdminStorageAsset({
+        file,
+        assetType: "milestone_logo",
+      });
+
+      setDraftLayout((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          elements: {
+            ...current.elements,
+            logo: {
+              ...current.elements.logo,
+              visible: true,
+              logoSource: "custom",
+              customLogoUrl: uploadedAsset.publicUrl,
+            },
+          },
+        };
+      });
+
+      if (previousLogoUrl && previousLogoUrl !== uploadedAsset.publicUrl) {
+        await deleteAdminStorageAsset({ url: previousLogoUrl }).catch(() => undefined);
+      }
+
+      setSelectedLayoutElement("logo");
+      setMessage("Custom milestone logo uploaded. Click Save Layout to make it public.");
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Milestone logo upload failed.",
+      );
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
+
+  async function saveSelectedLayout() {
+    if (!selectedPoster || !draftLayout) return;
+
+    const template = getTemplateForPoster(selectedPoster);
+    if (!template?.id) {
+      setError("Select or upload a milestone template before saving layout.");
+      return;
+    }
+
+    setIsSavingLayout(true);
+    setError("");
+    setMessage("");
+
+    const { error: updateError } = await supabase
+      .from("poster_templates")
+      .update({ layout: draftLayout })
+      .eq("id", template.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setIsSavingLayout(false);
+      return;
+    }
+
+    setTemplates((current) =>
+      current.map((item) =>
+        item.id === template.id ? { ...item, layout: draftLayout } : item,
+      ),
+    );
+
+    setMessage(`Layout saved for ${template.name}. Public milestone posters now use this layout.`);
+    setIsSavingLayout(false);
+  }
+
   async function downloadSelectedPoster() {
-    if (!selectedPoster || !captureRef.current) return;
+    if (!selectedPoster) return;
 
     setIsDownloading(true);
 
     try {
-      await waitForImages(captureRef.current);
-
       const template = getTemplateForPoster(selectedPoster);
       const width = Number(template?.canvas_width || DEFAULT_POSTER_WIDTH);
       const height = Number(template?.canvas_height || DEFAULT_POSTER_HEIGHT);
+      const layoutForDownload =
+        draftLayout || normalizeMilestoneLayout(template?.layout, width, height);
 
-      const canvas = await html2canvas(captureRef.current, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: null,
+      const canvas = await renderMilestonePosterToCanvas({
         width,
         height,
-        windowWidth: width,
-        windowHeight: height,
-        scrollX: 0,
-        scrollY: 0,
+        backgroundUrl: template?.image_url || null,
+        organizationName: organization?.name || "Organization",
+        organizationLogoUrl: organization?.logo_url || null,
+        eventTitle: eventInfo?.title || "Event",
+        milestoneCount: selectedPoster.milestone_count,
+        publishedResultCount: selectedPoster.published_result_count,
+        rows: parseLeaderboard(selectedPoster.leaderboard_snapshot),
+        layout: layoutForDownload,
+        pixelRatio: 2,
       });
 
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) resolve(value);
+          else reject(new Error("Unable to prepare poster PNG."));
+        }, "image/png");
+      });
+      const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = canvas.toDataURL("image/png");
+      link.href = objectUrl;
       link.download = `${eventInfo?.title || "event"}-after-${selectedPoster.milestone_count}-points-poster.png`
         .toLowerCase()
         .replace(/[^a-z0-9.]+/g, "-")
@@ -771,6 +925,7 @@ export default function MilestonePostersPage() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
     } catch (error) {
       console.error(error);
       alert("Poster download failed. Please try again.");
@@ -1019,7 +1174,7 @@ export default function MilestonePostersPage() {
                     key={poster.id}
                     poster={poster}
                     template={getTemplateForPoster(poster)}
-                    onPreview={() => setSelectedPoster(poster)}
+                    onPreview={() => openPosterPreview(poster)}
                     onTogglePublic={() => togglePosterPublic(poster)}
                     onDelete={() => deleteMilestonePoster(poster.id)}
                   />
@@ -1095,96 +1250,431 @@ export default function MilestonePostersPage() {
         </div>
       )}
 
-      {selectedPoster && (
-        <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/70 px-4 py-6 backdrop-blur-md">
-          <div className="mx-auto max-w-6xl overflow-hidden rounded-[2rem] bg-white shadow-2xl shadow-black/30">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
-              <div>
-                <h3 className="text-xl font-black tracking-[-0.04em] text-slate-950">
-                  {selectedPoster.title} Points Poster
-                </h3>
-                <p className="mt-1 text-sm font-bold text-slate-500">
-                  {selectedPoster.published_result_count} published results counted
-                </p>
-              </div>
+      {selectedPoster && (() => {
+        const selectedTemplate = getTemplateForPoster(selectedPoster);
+        const posterWidth = Number(selectedTemplate?.canvas_width || DEFAULT_POSTER_WIDTH);
+        const posterHeight = Number(selectedTemplate?.canvas_height || DEFAULT_POSTER_HEIGHT);
+        const activeLayout = draftLayout || normalizeMilestoneLayout(selectedTemplate?.layout, posterWidth, posterHeight);
+        const selectedLayer = activeLayout.elements[selectedLayoutElement];
+        const previewScale = Math.min(0.54, 570 / Math.max(1, posterWidth));
 
-              <button
-                type="button"
-                onClick={() => setSelectedPoster(null)}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 transition hover:bg-red-50 hover:text-red-600"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="grid lg:grid-cols-[1fr_320px]">
-              <div className="flex min-h-[680px] items-start justify-center overflow-auto bg-slate-100 p-5 sm:p-8">
-                <div className="overflow-hidden rounded-[1.5rem] bg-white shadow-2xl shadow-slate-900/20">
-                  <MilestonePosterVisual
-                    poster={selectedPoster}
-                    template={getTemplateForPoster(selectedPoster)}
-                    organizationName={organization?.name || "FestEazy"}
-                    eventTitle={eventInfo?.title || "Event"}
-                    scale={0.48}
-                  />
-                </div>
-              </div>
-
-              <aside className="border-t border-slate-100 bg-slate-50 p-5 sm:p-6 lg:border-l lg:border-t-0">
-                <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-900/5">
-                  <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-700">
-                    Poster Actions
+        return (
+          <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/70 px-3 py-4 backdrop-blur-md sm:px-4 sm:py-6">
+            <div className="mx-auto max-w-[1500px] overflow-hidden rounded-[2rem] bg-white shadow-2xl shadow-black/30">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-700">
+                    Editable Milestone Poster
                   </p>
-
-                  <button
-                    type="button"
-                    onClick={downloadSelectedPoster}
-                    disabled={isDownloading}
-                    className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-900/20 transition hover:bg-violet-700 disabled:opacity-60"
-                  >
-                    {isDownloading ? <Loader2 className="animate-spin" size={17} /> : <Download size={17} />}
-                    Download PNG
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => togglePosterPublic(selectedPoster)}
-                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
-                  >
-                    <Save size={17} />
-                    {selectedPoster.is_public ? "Hide from Public" : "Show on Public"}
-                  </button>
+                  <h3 className="mt-1 text-xl font-black tracking-[-0.04em] text-slate-950">
+                    {selectedPoster.title} Points Poster
+                  </h3>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    Drag any outlined element on the poster, then save the template layout.
+                  </p>
                 </div>
 
-                <div className="mt-5 rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-900/5">
-                  <h4 className="text-base font-black text-slate-950">Points Snapshot</h4>
-                  <div className="mt-4 space-y-2">
-                    {parseLeaderboard(selectedPoster.leaderboard_snapshot).map((row, index) => (
-                      <div key={row.teamId || row.teamName} className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
-                        <p className="text-sm font-black text-slate-700">#{index + 1} {row.teamName}</p>
-                        <p className="text-sm font-black text-violet-700">{row.points}</p>
+                <button
+                  type="button"
+                  onClick={closePosterPreview}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 transition hover:bg-red-50 hover:text-red-600"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
+                <div className="flex min-h-[680px] items-start justify-center overflow-auto bg-slate-100 p-4 sm:p-7">
+                  <div>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                          Poster Canvas
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">
+                          Template: {selectedTemplate?.name || "Built-in design"} • {posterWidth} × {posterHeight}
+                        </p>
                       </div>
-                    ))}
+                      <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700">
+                        Drag with mouse or touch
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-[1.5rem] bg-white shadow-2xl shadow-slate-900/20">
+                      <MilestonePosterCanvas
+                        width={posterWidth}
+                        height={posterHeight}
+                        backgroundUrl={selectedTemplate?.image_url || null}
+                        backgroundAlt={selectedTemplate?.name || "Milestone poster template"}
+                        organizationName={organization?.name || "Organization"}
+                        organizationLogoUrl={organization?.logo_url || null}
+                        eventTitle={eventInfo?.title || "Event"}
+                        milestoneCount={selectedPoster.milestone_count}
+                        publishedResultCount={selectedPoster.published_result_count}
+                        rows={parseLeaderboard(selectedPoster.leaderboard_snapshot)}
+                        scale={previewScale}
+                        layout={activeLayout}
+                        editable
+                        selectedElement={selectedLayoutElement}
+                        onSelectElement={setSelectedLayoutElement}
+                        onLayoutChange={setDraftLayout}
+                      />
+                    </div>
                   </div>
                 </div>
-              </aside>
-            </div>
-          </div>
 
-          <div className="pointer-events-none fixed -left-[99999px] top-0">
-            <div ref={captureRef}>
-              <MilestonePosterVisual
-                poster={selectedPoster}
-                template={getTemplateForPoster(selectedPoster)}
-                organizationName={organization?.name || "FestEazy"}
-                eventTitle={eventInfo?.title || "Event"}
-                scale={1}
-              />
+                <aside className="border-t border-slate-100 bg-slate-50 p-4 sm:p-5 xl:border-l xl:border-t-0">
+                  <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-900/5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-700">
+                          Layout Editor
+                        </p>
+                        <h4 className="mt-1 text-base font-black text-slate-950">
+                          {MILESTONE_ELEMENT_LABELS[selectedLayoutElement]}
+                        </h4>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-black text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedLayer.visible}
+                          onChange={(event) => updateSelectedLayer({ visible: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Show
+                      </label>
+                    </div>
+
+                    <label className="mt-4 block">
+                      <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        Select Element
+                      </span>
+                      <select
+                        value={selectedLayoutElement}
+                        onChange={(event) => setSelectedLayoutElement(event.target.value as MilestoneElementKey)}
+                        className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-black outline-none focus:border-violet-400"
+                      >
+                        {Object.entries(MILESTONE_ELEMENT_LABELS).map(([key, label]) => (
+                          <option key={key} value={key}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className={`mt-4 grid gap-2 ${selectedLayoutElement === "logo" ? "grid-cols-2" : "grid-cols-3"}`}>
+                      <NumberControl label="X" value={selectedLayer.x} onChange={(value) => updateSelectedLayer({ x: value })} />
+                      <NumberControl label="Y" value={selectedLayer.y} onChange={(value) => updateSelectedLayer({ y: value })} />
+                      <NumberControl label="Width" value={selectedLayer.width} min={40} onChange={(value) => updateSelectedLayer({ width: Math.max(40, value) })} />
+                      {selectedLayoutElement === "logo" && (
+                        <NumberControl
+                          label="Height"
+                          value={selectedLayer.height ?? selectedLayer.width}
+                          min={40}
+                          onChange={(value) => updateSelectedLayer({ height: Math.max(40, value) })}
+                        />
+                      )}
+                    </div>
+
+                    {selectedLayoutElement === "logo" ? (
+                      <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-700">
+                          Logo Source
+                        </p>
+
+                        <label className="mt-3 block">
+                          <span className="text-[10px] font-black uppercase tracking-[0.14em] text-violet-900">Source</span>
+                          <select
+                            value={selectedLayer.logoSource || "organization"}
+                            onChange={(event) =>
+                              updateSelectedLayer({
+                                logoSource: event.target.value as any,
+                                visible: event.target.value !== "none",
+                              })
+                            }
+                            className="mt-1.5 h-10 w-full rounded-xl border border-violet-200 bg-white px-3 text-xs font-black"
+                          >
+                            <option value="organization">Organization Logo</option>
+                            <option value="custom">Custom Logo</option>
+                            <option value="none">No Logo</option>
+                          </select>
+                        </label>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-violet-900">Fit</span>
+                            <select
+                              value={selectedLayer.objectFit || "contain"}
+                              onChange={(event) => updateSelectedLayer({ objectFit: event.target.value as any })}
+                              className="mt-1.5 h-10 w-full rounded-xl border border-violet-200 bg-white px-3 text-xs font-black"
+                            >
+                              <option value="contain">Contain</option>
+                              <option value="cover">Cover</option>
+                            </select>
+                          </label>
+                          <NumberControl
+                            label="Radius"
+                            value={selectedLayer.borderRadius ?? 0}
+                            min={0}
+                            onChange={(value) => updateSelectedLayer({ borderRadius: Math.max(0, value) })}
+                          />
+                        </div>
+
+                        <label className="mt-3 block">
+                          <span className="flex items-center justify-between text-[10px] font-black uppercase tracking-[0.14em] text-violet-900">
+                            <span>Opacity</span>
+                            <span>{Math.round((selectedLayer.opacity ?? 1) * 100)}%</span>
+                          </span>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={selectedLayer.opacity ?? 1}
+                            onChange={(event) => updateSelectedLayer({ opacity: Number(event.target.value) })}
+                            className="mt-2 w-full accent-violet-600"
+                          />
+                        </label>
+
+                        <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+                              {(selectedLayer.logoSource === "none"
+                                ? null
+                                : selectedLayer.logoSource === "custom"
+                                  ? selectedLayer.customLogoUrl
+                                  : organization?.logo_url) ? (
+                                <img
+                                  src={
+                                    selectedLayer.logoSource === "none"
+                                      ? ""
+                                      : selectedLayer.logoSource === "custom"
+                                        ? selectedLayer.customLogoUrl || ""
+                                        : organization?.logo_url || ""
+                                  }
+                                  alt="Logo preview"
+                                  className="h-full w-full object-contain"
+                                />
+                              ) : (
+                                <ImagePlus size={20} className="text-slate-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-black text-slate-800">
+                                {selectedLayer.logoSource === "custom"
+                                  ? "Custom milestone logo"
+                                  : selectedLayer.logoSource === "none"
+                                    ? "Logo hidden"
+                                    : "Organization logo"}
+                              </p>
+                              <p className="mt-1 text-[10px] font-bold leading-4 text-slate-500">
+                                Organization logo is taken automatically from your organization profile. Upload a custom logo only when this poster needs a different event mark.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <label className="mt-3 inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-3 text-xs font-black text-violet-700 transition hover:bg-violet-100">
+                          {isUploadingLogo ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                          {isUploadingLogo ? "Uploading..." : "Upload Custom Logo"}
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/jpg,image/webp"
+                            disabled={isUploadingLogo}
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] || null;
+                              event.currentTarget.value = "";
+                              if (file) uploadCustomMilestoneLogo(file);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <NumberControl label="Font Size" value={selectedLayer.fontSize} min={6} onChange={(value) => updateSelectedLayer({ fontSize: Math.max(6, value) })} />
+
+                      <label className="block">
+                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Weight</span>
+                        <select
+                          value={selectedLayer.fontWeight}
+                          onChange={(event) => updateSelectedLayer({ fontWeight: Number(event.target.value) })}
+                          className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-black"
+                        >
+                          {[300, 400, 500, 600, 700, 800, 900].map((weight) => (
+                            <option key={weight} value={weight}>{weight}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <label className="mt-4 block">
+                      <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Font</span>
+                      <select
+                        value={selectedLayer.fontFamily}
+                        onChange={(event) => updateSelectedLayer({ fontFamily: event.target.value })}
+                        className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-black"
+                      >
+                        <option value={'Inter, Arial, Helvetica, sans-serif'}>Inter / Sans</option>
+                        <option value={'Arial, Helvetica, sans-serif'}>Arial</option>
+                        <option value={'Georgia, "Times New Roman", serif'}>Georgia</option>
+                        <option value={'"Times New Roman", Times, serif'}>Times New Roman</option>
+                        <option value={'Impact, Haettenschweiler, sans-serif'}>Impact</option>
+                      </select>
+                    </label>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Color</span>
+                        <div className="mt-1.5 flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-2">
+                          <input
+                            type="color"
+                            value={selectedLayer.color}
+                            onChange={(event) => updateSelectedLayer({ color: event.target.value })}
+                            className="h-7 w-8 cursor-pointer border-0 bg-transparent p-0"
+                          />
+                          <input
+                            value={selectedLayer.color}
+                            onChange={(event) => updateSelectedLayer({ color: event.target.value })}
+                            className="min-w-0 flex-1 bg-transparent text-[11px] font-black outline-none"
+                          />
+                        </div>
+                      </label>
+
+                      <label className="block">
+                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Align</span>
+                        <select
+                          value={selectedLayer.textAlign}
+                          onChange={(event) => updateSelectedLayer({ textAlign: event.target.value as any })}
+                          className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-black"
+                        >
+                          <option value="left">Left</option>
+                          <option value="center">Center</option>
+                          <option value="right">Right</option>
+                        </select>
+                      </label>
+                    </div>
+
+                      </>
+                    )}
+
+                    {selectedLayoutElement === "leaderboard" && (
+                      <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-700">
+                          Leaderboard Rows
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <NumberControl label="Row Gap" value={selectedLayer.rowGap ?? 14} min={0} onChange={(value) => updateSelectedLayer({ rowGap: Math.max(0, value) })} />
+                          <NumberControl label="Name Size" value={selectedLayer.nameFontSize ?? selectedLayer.fontSize} min={6} onChange={(value) => updateSelectedLayer({ nameFontSize: Math.max(6, value) })} />
+                          <NumberControl label="Points Size" value={selectedLayer.pointsFontSize ?? selectedLayer.fontSize} min={6} onChange={(value) => updateSelectedLayer({ pointsFontSize: Math.max(6, value) })} />
+                          <NumberControl label="Rank Size" value={selectedLayer.rankFontSize ?? 20} min={6} onChange={(value) => updateSelectedLayer({ rankFontSize: Math.max(6, value) })} />
+                        </div>
+                        <label className="mt-3 flex items-center gap-2 text-xs font-black text-violet-900">
+                          <input
+                            type="checkbox"
+                            checked={selectedLayer.showRanks !== false}
+                            onChange={(event) => updateSelectedLayer({ showRanks: event.target.checked })}
+                            className="h-4 w-4 rounded border-violet-300"
+                          />
+                          Show rank numbers
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="mt-5 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={resetSelectedLayout}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-black text-slate-700"
+                      >
+                        Reset Layout
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveSelectedLayout}
+                        disabled={isSavingLayout}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-3 text-xs font-black text-white disabled:opacity-60"
+                      >
+                        {isSavingLayout ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        Save Layout
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-900/5">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-500">
+                      Poster Actions
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={downloadSelectedPoster}
+                      disabled={isDownloading}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {isDownloading ? <Loader2 className="animate-spin" size={17} /> : <Download size={17} />}
+                      Download Current Preview
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => togglePosterPublic(selectedPoster)}
+                      className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    >
+                      <Eye size={17} />
+                      {selectedPoster.is_public ? "Hide from Public" : "Show on Public"}
+                    </button>
+
+                    <p className="mt-3 text-[11px] font-bold leading-5 text-slate-500">
+                      Download uses the current editor position. Save Layout makes the same arrangement permanent for public milestone posters using this template.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-5 shadow-lg shadow-slate-900/5">
+                    <h4 className="text-base font-black text-slate-950">Points Snapshot</h4>
+                    <div className="mt-4 max-h-64 space-y-2 overflow-auto pr-1">
+                      {parseLeaderboard(selectedPoster.leaderboard_snapshot).map((row, index) => (
+                        <div key={row.teamId || row.teamName} className="flex justify-between gap-4 rounded-2xl bg-slate-50 px-4 py-3">
+                          <p className="text-sm font-black text-slate-700">#{index + 1} {row.teamName}</p>
+                          <p className="text-sm font-black text-violet-700">{row.points}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </aside>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </AdminShell>
+  );
+}
+
+function NumberControl({
+  label,
+  value,
+  min,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-500">{label}</span>
+      <input
+        type="number"
+        value={Math.round(Number(value) || 0)}
+        min={min}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (Number.isFinite(next)) onChange(next);
+        }}
+        className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-black outline-none focus:border-violet-400"
+      />
+    </label>
   );
 }
 
@@ -1299,103 +1789,6 @@ function MilestoneAdminCard({
         </div>
       </div>
     </article>
-  );
-}
-
-function MilestonePosterVisual({
-  poster,
-  template,
-  organizationName,
-  eventTitle,
-  scale,
-}: {
-  poster: MilestonePoster;
-  template: PosterTemplate | null;
-  organizationName: string;
-  eventTitle: string;
-  scale: number;
-}) {
-  const width = Number(template?.canvas_width || DEFAULT_POSTER_WIDTH);
-  const height = Number(template?.canvas_height || DEFAULT_POSTER_HEIGHT);
-  const rows = parseLeaderboard(poster.leaderboard_snapshot).slice(0, 9);
-
-  return (
-    <div
-      className="relative overflow-hidden bg-slate-950"
-      style={{ width: width * scale, height: height * scale }}
-    >
-      <div
-        className="absolute left-0 top-0 overflow-hidden bg-slate-950"
-        style={{
-          width,
-          height,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-        }}
-      >
-        {template?.image_url ? (
-          <img
-            src={template.image_url}
-            alt={template.name}
-            crossOrigin="anonymous"
-            className="absolute inset-0 h-full w-full object-cover"
-            draggable={false}
-          />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-[#3b0b4f] via-[#9b0f73] to-[#1f0635]" />
-        )}
-
-        <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/25" />
-        <div className="absolute -left-32 top-28 h-72 w-[1300px] rotate-[-4deg] rounded-[50%] bg-white/12 blur-sm" />
-        <div className="absolute -left-44 bottom-36 h-64 w-[1300px] rotate-[3deg] rounded-[50%] bg-black/15 blur-sm" />
-
-        <div className="absolute left-[70px] right-[70px] top-[64px]">
-          <p className="text-[14px] font-black uppercase tracking-[0.35em] text-white/55">
-            Official Team Points Update
-          </p>
-          <p className="mt-4 max-w-[900px] text-[18px] font-bold leading-7 text-white/55">
-            {organizationName} • {eventTitle} • Powered by FestEazy
-          </p>
-        </div>
-
-        <div className="absolute left-[160px] top-[430px] flex items-end gap-8 text-white">
-          <p className="font-serif text-[82px] italic leading-none tracking-[-0.08em] text-white/85">
-            After
-          </p>
-          <p className="text-[110px] font-light leading-none tracking-[-0.1em] text-white">
-            {poster.milestone_count}
-          </p>
-        </div>
-
-        <div className="absolute left-[170px] top-[590px] w-[520px] space-y-[12px]">
-          {rows.map((row, index) => (
-            <div key={row.teamId || row.teamName} className="grid grid-cols-[1fr_130px] items-center gap-8">
-              <p className="truncate text-[45px] font-light leading-none tracking-[-0.08em] text-white">
-                {row.teamName}
-              </p>
-              <p className="text-right text-[48px] font-light leading-none tracking-[-0.08em] text-white">
-                {row.points}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div className="absolute bottom-[74px] left-[120px] right-[120px] flex items-end justify-between gap-8 text-white">
-          <div>
-            <p className="text-[16px] font-black uppercase tracking-[0.32em] text-white/45">
-              Championship Standings
-            </p>
-            <h2 className="mt-3 text-[62px] font-black leading-none tracking-[-0.08em]">
-              {eventTitle}
-            </h2>
-          </div>
-
-          <div className="rounded-full bg-white/15 px-7 py-4 text-[20px] font-black uppercase tracking-[0.2em] backdrop-blur">
-            {poster.published_result_count} Results
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
