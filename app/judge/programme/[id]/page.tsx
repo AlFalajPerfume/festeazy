@@ -225,20 +225,14 @@ export default function JudgeProgrammePage() {
     }> = [];
 
     for (const entry of entries) {
-      const rawValue =
-        values[entry.registration_id];
+      const rawValue = String(
+        values[entry.registration_id] ?? "",
+      ).trim();
 
-      if (
-        rawValue === undefined ||
-        rawValue.trim() === ""
-      ) {
-        setError(
-          `Enter a mark for Code ${entry.code_letter}.`,
-        );
-        return;
-      }
-
-      const mark = Number(rawValue);
+      // A blank mark is intentionally treated as zero. This lets a judge
+      // submit the whole programme even when one or more participants receive
+      // no mark, without forcing the judge to type 0 into every empty field.
+      const mark = rawValue === "" ? 0 : Number(rawValue);
 
       if (
         !Number.isFinite(mark) ||
@@ -246,7 +240,7 @@ export default function JudgeProgrammePage() {
         mark > data.programme.total_marks
       ) {
         setError(
-          `Every mark must be between 0 and ${data.programme.total_marks}.`,
+          `Every mark must be between 0 and ${data.programme.total_marks}. Blank fields are saved as 0.`,
         );
         return;
       }
@@ -475,7 +469,7 @@ export default function JudgeProgrammePage() {
               <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
                 Enter marks using code letters only.
                 Student name, chest number, class and team
-                are hidden.
+                are hidden. Any mark left blank will be saved as 0.
               </p>
             </div>
 
@@ -504,6 +498,12 @@ export default function JudgeProgrammePage() {
                   : "Save Marks"}
             </button>
           </div>
+
+          {entries.length > 0 && !marksLocked && (
+            <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs font-black text-amber-800">
+              Blank mark fields are automatically submitted as 0 marks.
+            </div>
+          )}
 
           {entries.length === 0 ? (
             <div className="flex min-h-72 flex-col items-center justify-center p-8 text-center">

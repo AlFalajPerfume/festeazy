@@ -18,9 +18,9 @@ export async function POST(request: NextRequest) {
     const programmeId = String(body?.programmeId || "").trim();
     const scores = Array.isArray(body?.scores) ? body.scores : [];
 
-    if (!programmeId || scores.length === 0) {
+    if (!programmeId) {
       return NextResponse.json(
-        { error: "Programme and marks are required." },
+        { error: "Programme is required." },
         { status: 400 },
       );
     }
@@ -76,27 +76,56 @@ export async function POST(request: NextRequest) {
       (codeRes.data || []).map((item) => item.registration_id),
     );
 
-    if (scores.length !== allowedRegistrations.size) {
+    if (allowedRegistrations.size === 0) {
       return NextResponse.json(
-        { error: "Enter marks for every present participant." },
+        { error: "No present participants are available for this programme." },
         { status: 400 },
       );
     }
 
+    // Validate only participant IDs actually sent by the client. Missing rows
+    // are intentionally filled with 0 below, so blank/unfilled marks can still
+    // be submitted safely for every present participant.
+    const providedScores = new Map<string, unknown>();
+
     for (const score of scores) {
-      if (!allowedRegistrations.has(score.registration_id)) {
+      const registrationId = String(score?.registration_id || "").trim();
+
+      if (!registrationId || !allowedRegistrations.has(registrationId)) {
         return NextResponse.json(
           { error: "An invalid participant was included." },
           { status: 400 },
         );
       }
 
-      const mark = Number(score.mark);
+      providedScores.set(registrationId, score?.mark);
+    }
 
-      if (!Number.isFinite(mark) || mark < 0 || mark > maximumMark) {
+    const normalizedScores = Array.from(allowedRegistrations).map(
+      (registrationId) => {
+        const rawMark = providedScores.get(registrationId);
+        const isBlank =
+          rawMark === undefined ||
+          rawMark === null ||
+          (typeof rawMark === "string" && rawMark.trim() === "");
+        const mark = isBlank ? 0 : Number(rawMark);
+
+        return {
+          registration_id: registrationId,
+          mark,
+        };
+      },
+    );
+
+    for (const score of normalizedScores) {
+      if (
+        !Number.isFinite(score.mark) ||
+        score.mark < 0 ||
+        score.mark > maximumMark
+      ) {
         return NextResponse.json(
           {
-            error: `Mark must be between 0 and ${maximumMark}.`,
+            error: `Mark must be between 0 and ${maximumMark}. Blank fields are saved as 0.`,
           },
           { status: 400 },
         );
@@ -108,9 +137,9 @@ export async function POST(request: NextRequest) {
       {
         target_judge_id: judge.id,
         target_programme_id: programmeId,
-        score_rows: scores.map((score: any) => ({
+        score_rows: normalizedScores.map((score) => ({
           registration_id: score.registration_id,
-          mark: Number(score.mark),
+          mark: score.mark,
           criteria_scores: {},
         })),
       },

@@ -29,7 +29,9 @@ type JudgeProgramme = {
   id: string;
   name: string;
   sort_order?: number;
+  category_id?: string | null;
   category_name?: string | null;
+  gender_scope?: string | null;
   programme_type?: string | null;
   stage_type?: string | null;
   total_entries: number;
@@ -80,6 +82,40 @@ type ProgrammeCardData = {
   status: ProgrammeStatus;
 };
 
+function normalizeGender(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized.includes("female") || normalized.includes("girl")) {
+    return "female";
+  }
+
+  if (normalized.includes("male") || normalized.includes("boy")) {
+    return "male";
+  }
+
+  return "all";
+}
+
+function formatGender(value: string | null | undefined) {
+  const normalized = normalizeGender(value);
+
+  if (normalized === "female") return "Girls";
+  if (normalized === "male") return "Boys";
+  return "Mixed";
+}
+
+function normalizeStage(value: string | null | undefined) {
+  const normalized = String(value || "stage")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+
+  return normalized === "off_stage" || normalized === "offstage"
+    ? "off_stage"
+    : "stage";
+}
+
 export default function JudgePortalPage() {
   const router = useRouter();
 
@@ -97,6 +133,11 @@ export default function JudgePortalPage() {
 
   const [programmeFilter, setProgrammeFilter] =
     useState<ProgrammeFilter>("remaining");
+
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState("all");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -159,49 +200,119 @@ export default function JudgePortalPage() {
     );
   }, [data]);
 
-  const programmeOptions = useMemo(() => {
-    return programmeCards.map((item, index) => ({
-      id: item.programme.id,
-      name: item.programme.name,
-      sort_order:
-        item.programme.sort_order ?? index + 1,
-      categoryName:
-        item.programme.category_name || "General",
-      programmeType:
-        item.programme.programme_type || "individual",
-      stageType:
-        item.programme.stage_type || "stage",
-      status: item.status,
-    }));
+  const categoryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: Array<{ value: string; label: string }> = [];
+    let hasGeneral = false;
+
+    programmeCards.forEach((item) => {
+      const categoryId = item.programme.category_id || "";
+
+      if (!categoryId) {
+        hasGeneral = true;
+        return;
+      }
+
+      if (seen.has(categoryId)) return;
+      seen.add(categoryId);
+
+      options.push({
+        value: categoryId,
+        label: item.programme.category_name || "Category",
+      });
+    });
+
+    if (hasGeneral) {
+      options.push({ value: "general", label: "General" });
+    }
+
+    return options;
   }, [programmeCards]);
 
-  const filteredProgrammeCards = useMemo(() => {
-    const keyword = programmeSearch
-      .trim()
-      .toLowerCase();
+  const hasProgrammeMetaFilters =
+    categoryFilter !== "all" ||
+    genderFilter !== "all" ||
+    typeFilter !== "all" ||
+    stageFilter !== "all";
 
+  const metadataFilteredProgrammeCards = useMemo(() => {
     return programmeCards.filter((item) => {
-      const matchesFilter =
+      const programme = item.programme;
+
+      const matchesCategory =
+        categoryFilter === "all" ||
+        (categoryFilter === "general"
+          ? !programme.category_id
+          : programme.category_id === categoryFilter);
+
+      const normalizedGender = normalizeGender(programme.gender_scope);
+      const matchesGender =
+        genderFilter === "all" ||
+        (genderFilter === "mixed"
+          ? normalizedGender === "all"
+          : normalizedGender === genderFilter);
+
+      const matchesType =
+        typeFilter === "all" ||
+        String(programme.programme_type || "individual").toLowerCase() ===
+          typeFilter;
+
+      const matchesStage =
+        stageFilter === "all" ||
+        normalizeStage(programme.stage_type) === stageFilter;
+
+      return (
+        matchesCategory &&
+        matchesGender &&
+        matchesType &&
+        matchesStage
+      );
+    });
+  }, [
+    programmeCards,
+    categoryFilter,
+    genderFilter,
+    typeFilter,
+    stageFilter,
+  ]);
+
+  const statusFilteredProgrammeCards = useMemo(() => {
+    return metadataFilteredProgrammeCards.filter((item) => {
+      return (
         programmeFilter === "all" ||
         (programmeFilter === "remaining" &&
           (item.status === "Pending" ||
             item.status === "In Progress")) ||
-        (programmeFilter === "completed" &&
-          item.completed) ||
+        (programmeFilter === "completed" && item.completed) ||
         (programmeFilter === "no_participants" &&
-          item.status === "No Participants");
+          item.status === "No Participants")
+      );
+    });
+  }, [metadataFilteredProgrammeCards, programmeFilter]);
 
-      if (!matchesFilter) {
-        return false;
-      }
+  const programmeOptions = useMemo(() => {
+    return statusFilteredProgrammeCards.map((item, index) => ({
+      id: item.programme.id,
+      name: item.programme.name,
+      sort_order: item.programme.sort_order ?? index + 1,
+      categoryName: item.programme.category_name || "General",
+      programmeType: item.programme.programme_type || "individual",
+      stageType: item.programme.stage_type || "stage",
+      genderScope: item.programme.gender_scope || "all",
+    }));
+  }, [statusFilteredProgrammeCards]);
 
-      if (!keyword) {
-        return true;
-      }
+  const filteredProgrammeCards = useMemo(() => {
+    const keyword = programmeSearch.trim().toLowerCase();
 
+    if (!keyword) return statusFilteredProgrammeCards;
+
+    return statusFilteredProgrammeCards.filter((item) => {
       const searchableText = [
         item.programme.name,
         item.programme.category_name,
+        item.programme.gender_scope,
+        formatGender(item.programme.gender_scope),
         item.programme.programme_type,
         item.programme.stage_type,
         item.status,
@@ -212,11 +323,30 @@ export default function JudgePortalPage() {
 
       return searchableText.includes(keyword);
     });
-  }, [
-    programmeCards,
-    programmeSearch,
-    programmeFilter,
-  ]);
+  }, [statusFilteredProgrammeCards, programmeSearch]);
+
+  const filteredCompletedCount = metadataFilteredProgrammeCards.filter(
+    (item) => item.completed,
+  ).length;
+
+  const filteredRemainingCount = metadataFilteredProgrammeCards.filter(
+    (item) =>
+      item.status === "Pending" ||
+      item.status === "In Progress",
+  ).length;
+
+  const filteredNoParticipantsCount = metadataFilteredProgrammeCards.filter(
+    (item) => item.status === "No Participants",
+  ).length;
+
+  function resetProgrammeFilters() {
+    setCategoryFilter("all");
+    setGenderFilter("all");
+    setTypeFilter("all");
+    setStageFilter("all");
+    setProgrammeSearch("");
+    setSelectedProgrammeId("");
+  }
 
   const completedCount = programmeCards.filter(
     (item) => item.completed,
@@ -357,6 +487,10 @@ export default function JudgePortalPage() {
       setSelectedProgrammeId("");
       setProgrammeSearch("");
       setProgrammeFilter("remaining");
+      setCategoryFilter("all");
+      setGenderFilter("all");
+      setTypeFilter("all");
+      setStageFilter("all");
     } catch (logoutError: any) {
       setError(
         logoutError?.message || "Unable to log out.",
@@ -654,10 +788,117 @@ export default function JudgePortalPage() {
           </div>
         </div>
 
-        {/* Searchable programme selector */}
+        {/* Programme filters + searchable selector */}
         {programmeCards.length > 0 && (
           <section className="mt-6 rounded-[1.7rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-900/5">
-            <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+            <div className="rounded-[1.4rem] border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-950">
+                    Programme Filters
+                  </p>
+                  <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                    Narrow the assigned programme list before opening the mark sheet.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-violet-700 ring-1 ring-slate-200">
+                    {metadataFilteredProgrammeCards.length} matching
+                  </span>
+
+                  {hasProgrammeMetaFilters && (
+                    <button
+                      type="button"
+                      onClick={resetProgrammeFilters}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black text-slate-600 transition hover:bg-slate-100"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <label className="block">
+                  <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                    Category
+                  </span>
+                  <select
+                    value={categoryFilter}
+                    onChange={(event) => {
+                      setCategoryFilter(event.target.value);
+                      setSelectedProgrammeId("");
+                    }}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                  >
+                    <option value="all">All Categories</option>
+                    {categoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                    Gender
+                  </span>
+                  <select
+                    value={genderFilter}
+                    onChange={(event) => {
+                      setGenderFilter(event.target.value);
+                      setSelectedProgrammeId("");
+                    }}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                  >
+                    <option value="all">All Genders</option>
+                    <option value="male">Boys</option>
+                    <option value="female">Girls</option>
+                    <option value="mixed">Mixed / All</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                    Type
+                  </span>
+                  <select
+                    value={typeFilter}
+                    onChange={(event) => {
+                      setTypeFilter(event.target.value);
+                      setSelectedProgrammeId("");
+                    }}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="individual">Individual</option>
+                    <option value="group">Group</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                    Location
+                  </span>
+                  <select
+                    value={stageFilter}
+                    onChange={(event) => {
+                      setStageFilter(event.target.value);
+                      setSelectedProgrammeId("");
+                    }}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                  >
+                    <option value="all">All Locations</option>
+                    <option value="stage">Stage</option>
+                    <option value="off_stage">Off-stage</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
               <div>
                 <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
                   Select Programme
@@ -667,9 +908,13 @@ export default function JudgePortalPage() {
                   value={selectedProgrammeId}
                   onChange={handleProgrammeSelect}
                   options={programmeOptions}
-                  placeholder="Search and select programme..."
-                  emptyText="No assigned programmes found"
+                  placeholder="Search filtered programme..."
+                  emptyText="No programmes match the selected filters"
                 />
+
+                <p className="mt-2 text-[11px] font-bold leading-5 text-slate-400">
+                  The dropdown follows Category, Gender, Type, Location and the status filter below.
+                </p>
               </div>
 
               <div>
@@ -686,20 +931,16 @@ export default function JudgePortalPage() {
                   <input
                     value={programmeSearch}
                     onChange={(event) =>
-                      setProgrammeSearch(
-                        event.target.value,
-                      )
+                      setProgrammeSearch(event.target.value)
                     }
-                    placeholder="Search name, category or status..."
+                    placeholder="Search name, category, gender or status..."
                     className="w-full bg-transparent text-sm font-bold text-slate-950 outline-none placeholder:text-slate-400"
                   />
 
                   {programmeSearch && (
                     <button
                       type="button"
-                      onClick={() =>
-                        setProgrammeSearch("")
-                      }
+                      onClick={() => setProgrammeSearch("")}
                       className="text-xs font-black text-violet-700"
                     >
                       Clear
@@ -719,43 +960,34 @@ export default function JudgePortalPage() {
                   {
                     id: "remaining",
                     label: "Remaining",
-                    count: programmeCards.filter(
-                      (item) =>
-                        item.status === "Pending" ||
-                        item.status === "In Progress",
-                    ).length,
+                    count: filteredRemainingCount,
                   },
                   {
                     id: "completed",
                     label: "Completed",
-                    count: completedCount,
+                    count: filteredCompletedCount,
                   },
                   {
                     id: "no_participants",
                     label: "No Participants",
-                    count: programmeCards.filter(
-                      (item) =>
-                        item.status === "No Participants",
-                    ).length,
+                    count: filteredNoParticipantsCount,
                   },
                   {
                     id: "all",
                     label: "All",
-                    count: programmeCards.length,
+                    count: metadataFilteredProgrammeCards.length,
                   },
                 ].map((filter) => {
-                  const active =
-                    programmeFilter === filter.id;
+                  const active = programmeFilter === filter.id;
 
                   return (
                     <button
                       key={filter.id}
                       type="button"
-                      onClick={() =>
-                        setProgrammeFilter(
-                          filter.id as ProgrammeFilter,
-                        )
-                      }
+                      onClick={() => {
+                        setProgrammeFilter(filter.id as ProgrammeFilter);
+                        setSelectedProgrammeId("");
+                      }}
                       className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black transition ${
                         active
                           ? "bg-violet-600 text-white shadow-lg shadow-violet-900/20"
@@ -779,8 +1011,7 @@ export default function JudgePortalPage() {
             </div>
 
             <p className="mt-3 text-xs font-bold text-slate-500">
-              Remaining shows programmes that still need
-              marks. Completed programmes are locked.
+              Remaining shows programmes that still need marks. Completed programmes are locked.
             </p>
           </section>
         )}
@@ -811,15 +1042,18 @@ export default function JudgePortalPage() {
             </h3>
 
             <p className="mt-2 text-sm font-bold text-slate-500">
-              Change the programme search and try again.
+              Change the programme filters or search and try again.
             </p>
 
             <button
               type="button"
-              onClick={() => setProgrammeSearch("")}
+              onClick={() => {
+                resetProgrammeFilters();
+                setProgrammeFilter("remaining");
+              }}
               className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl bg-violet-600 px-5 text-sm font-black text-white"
             >
-              Clear Search
+              Reset Programme Filters
             </button>
           </div>
         ) : (
@@ -882,6 +1116,13 @@ function ProgrammeCard({
           <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
             {item.programme.category_name ||
               "General"}
+
+            {item.programme.gender_scope && (
+              <>
+                <span className="mx-1.5">•</span>
+                {formatGender(item.programme.gender_scope)}
+              </>
+            )}
 
             {item.programme.programme_type && (
               <>

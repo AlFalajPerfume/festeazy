@@ -57,7 +57,7 @@ export async function GET() {
     const { data, error } = await supabaseAdmin
       .from("programmes")
       .select(
-        "id, name, programme_type, stage_type, category_id, total_marks, sort_order, status",
+        "id, name, programme_type, stage_type, category_id, gender_scope, total_marks, sort_order, status",
       )
       .in("id", programmeIds)
       .eq("status", "active")
