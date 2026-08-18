@@ -110,6 +110,46 @@ type CalculatedEntry = {
   points: number;
 };
 
+
+function getCodeSequenceValue(codeLetter: string) {
+  const normalized = String(codeLetter || "")
+    .trim()
+    .toUpperCase();
+
+  if (!/^[A-Z]+$/.test(normalized)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  let value = 0;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    value =
+      value * 26 +
+      (normalized.charCodeAt(index) - 64);
+  }
+
+  return value;
+}
+
+function compareCodeLetters(
+  firstCode: string,
+  secondCode: string,
+) {
+  const firstValue = getCodeSequenceValue(firstCode);
+  const secondValue = getCodeSequenceValue(secondCode);
+
+  if (firstValue !== secondValue) {
+    return firstValue - secondValue;
+  }
+
+  return String(firstCode || "")
+    .trim()
+    .toUpperCase()
+    .localeCompare(
+      String(secondCode || "").trim().toUpperCase(),
+    );
+}
+
 export default function MarkEntryPage() {
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -194,12 +234,9 @@ export default function MarkEntryPage() {
           code.is_present,
       )
       .sort((first, second) =>
-        String(first.code_letter).localeCompare(
-          String(second.code_letter),
-          undefined,
-          {
-            numeric: true,
-          },
+        compareCodeLetters(
+          first.code_letter,
+          second.code_letter,
         ),
       );
   }, [codes, programmeId]);

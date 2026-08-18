@@ -49,6 +49,46 @@ type JudgeProgrammeData = {
   entries: JudgeEntry[];
 };
 
+
+function getCodeSequenceValue(codeLetter: string) {
+  const normalized = String(codeLetter || "")
+    .trim()
+    .toUpperCase();
+
+  if (!/^[A-Z]+$/.test(normalized)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  let value = 0;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    value =
+      value * 26 +
+      (normalized.charCodeAt(index) - 64);
+  }
+
+  return value;
+}
+
+function compareCodeLetters(
+  firstCode: string,
+  secondCode: string,
+) {
+  const firstValue = getCodeSequenceValue(firstCode);
+  const secondValue = getCodeSequenceValue(secondCode);
+
+  if (firstValue !== secondValue) {
+    return firstValue - secondValue;
+  }
+
+  return String(firstCode || "")
+    .trim()
+    .toUpperCase()
+    .localeCompare(
+      String(secondCode || "").trim().toUpperCase(),
+    );
+}
+
 export default function JudgeProgrammePage() {
   const router = useRouter();
   const params = useParams();
@@ -77,7 +117,13 @@ export default function JudgeProgrammePage() {
   }, [programmeId]);
 
   const entries = useMemo(() => {
-    return data?.entries || [];
+    return [...(data?.entries || [])].sort(
+      (first, second) =>
+        compareCodeLetters(
+          first.code_letter,
+          second.code_letter,
+        ),
+    );
   }, [data]);
 
   const marksLocked = useMemo(() => {
