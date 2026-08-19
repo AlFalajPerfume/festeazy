@@ -270,6 +270,7 @@ type TopScorerRow = {
   gender: string;
   categoryName: string;
   className: string;
+  divisionName: string;
   teamName: string;
   stagePoints: number;
   offStagePoints: number;
@@ -446,6 +447,14 @@ const LANDSCAPE_REPORTS: ReportType[] = [
   "result_summary",
 ];
 
+const RESULT_DETAIL_REPORTS: ReportType[] = [
+  "winners_list",
+  "prize_distribution",
+  "encouragement_gift",
+  "top_scorers",
+  "result_summary",
+];
+
 const CHEST_WALLPAPERS: {
   id: "classic" | "sunrise";
   name: string;
@@ -521,7 +530,8 @@ export default function ReportsPage() {
   const [teamFilter, setTeamFilter] = useState("all");
   const [stageLocationFilter, setStageLocationFilter] = useState("all");
   const [showParticipantDivision, setShowParticipantDivision] = useState(false);
-  const [showEncouragementDivision, setShowEncouragementDivision] = useState(false);
+  const [showResultClass, setShowResultClass] = useState(true);
+  const [showResultDivision, setShowResultDivision] = useState(false);
   const [showEntryFormDivision, setShowEntryFormDivision] = useState(false);
   const [showEntryFormChestNo, setShowEntryFormChestNo] = useState(false);
   const [showChestCardDivision, setShowChestCardDivision] = useState(false);
@@ -1673,6 +1683,7 @@ export default function ReportsPage() {
               student.category_id || programme.category_id,
             ),
             className: getClassName(student.class_id),
+            divisionName: getDivisionName(student.division_id),
             teamName: getTeamName(student.team_id || registration.team_id),
             stagePoints: 0,
             offStagePoints: 0,
@@ -1723,6 +1734,7 @@ export default function ReportsPage() {
     teams,
     categories,
     classes,
+    divisions,
     search,
     programmeFilter,
     categoryFilter,
@@ -2021,11 +2033,29 @@ export default function ReportsPage() {
         .map((item) => getStudent(item.student_id))
         .filter(Boolean) as Student[];
 
+      const classNames = Array.from(
+        new Set(
+          members
+            .map((student) => getClassName(student.class_id))
+            .filter((name) => name && name !== "-"),
+        ),
+      );
+
+      const divisionNames = Array.from(
+        new Set(
+          members
+            .map((student) => getDivisionName(student.division_id))
+            .filter((name) => name && name !== "-"),
+        ),
+      );
+
       return {
         title: registration.group_name || "Group",
         subtitle: members
           .map((student) => `#${cleanChest(student.chest_no)} ${student.name}`)
           .join(", "),
+        className: classNames.join(", ") || "-",
+        divisionName: divisionNames.join(", ") || "-",
         teamId: registration.team_id,
         type: "Group",
       };
@@ -2040,6 +2070,8 @@ export default function ReportsPage() {
       subtitle: student
         ? `${getClassName(student.class_id)} • ${getTeamName(student.team_id)}`
         : "-",
+      className: student ? getClassName(student.class_id) : "-",
+      divisionName: student ? getDivisionName(student.division_id) : "-",
       teamId: registration.team_id || student?.team_id || null,
       type: "Individual",
     };
@@ -2653,10 +2685,13 @@ export default function ReportsPage() {
           Student: row.studentName,
           Gender: formatGenderScope(row.gender),
           Category: row.categoryName,
-          Class: row.className,
         };
 
-        if (showEncouragementDivision) {
+        if (showResultClass) {
+          csvRow.Class = row.className;
+        }
+
+        if (showResultDivision) {
           csvRow.Division = row.divisionName;
         }
 
@@ -2703,19 +2738,30 @@ export default function ReportsPage() {
     }
 
     if (reportType === "top_scorers") {
-      return topScorerRows.map((row) => ({
-        Rank: row.rank,
-        Chest: row.chestNo,
-        Student: row.studentName,
-        Gender: formatGenderScope(row.gender),
-        Category: row.categoryName,
-        Class: row.className,
-        Team: row.teamName,
-        StagePoints: row.stagePoints,
-        OffStagePoints: row.offStagePoints,
-        TotalPoints: row.totalPoints,
-        Results: row.resultCount,
-      }));
+      return topScorerRows.map((row) => {
+        const csvRow: Record<string, string | number> = {
+          Rank: row.rank,
+          Chest: row.chestNo,
+          Student: row.studentName,
+          Gender: formatGenderScope(row.gender),
+          Category: row.categoryName,
+        };
+
+        if (showResultClass) {
+          csvRow.Class = row.className;
+        }
+
+        if (showResultDivision) {
+          csvRow.Division = row.divisionName;
+        }
+
+        csvRow.Team = row.teamName;
+        csvRow.StagePoints = row.stagePoints;
+        csvRow.OffStagePoints = row.offStagePoints;
+        csvRow.TotalPoints = row.totalPoints;
+        csvRow.Results = row.resultCount;
+        return csvRow;
+      });
     }
 
     if (
@@ -2727,18 +2773,28 @@ export default function ReportsPage() {
         const programme = getProgramme(result.programme_id);
         const participant = getResultParticipant(result);
 
-        return {
+        const csvRow: Record<string, string | number> = {
           No: index + 1,
           Programme: programme?.name || "-",
           Category: getCategoryName(programme?.category_id || null),
           Position: getPositionLabel(result.position),
           Participant: participant?.title || "-",
-          Team: getTeamName(participant?.teamId || null),
-          Mark: result.total_mark,
-          Grade: result.grade || "-",
-          Points: result.points,
-          Published: result.is_published ? "Yes" : "No",
         };
+
+        if (showResultClass) {
+          csvRow.Class = participant?.className || "-";
+        }
+
+        if (showResultDivision) {
+          csvRow.Division = participant?.divisionName || "-";
+        }
+
+        csvRow.Team = getTeamName(participant?.teamId || null);
+        csvRow.Mark = result.total_mark;
+        csvRow.Grade = result.grade || "-";
+        csvRow.Points = result.points;
+        csvRow.Published = result.is_published ? "Yes" : "No";
+        return csvRow;
       });
     }
 
@@ -4106,29 +4162,48 @@ export default function ReportsPage() {
                     </div>
                   )}
 
-                  {reportType === "encouragement_gift" && (
+                  {RESULT_DETAIL_REPORTS.includes(reportType) && (
                     <div className="md:col-span-2 xl:col-span-3">
-                      <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
                         <div>
                           <p className="text-sm font-black text-slate-950">
-                            Encouragement Gift Report Options
+                            Result Report Columns
                           </p>
                           <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
-                            Each student appears only once. Anyone with a published First or Second place in any programme is excluded completely. Third-place students remain eligible.
+                            Choose whether Class and Division should appear in this result report, print/PDF preview and CSV export.
                           </p>
+                          {reportType === "encouragement_gift" && (
+                            <p className="mt-2 text-[11px] font-bold leading-5 text-amber-700">
+                              Encouragement Gift keeps one row per eligible student. Published First or Second place winners are excluded; Third-place students remain eligible.
+                            </p>
+                          )}
                         </div>
 
-                        <label className="inline-flex cursor-pointer items-center gap-3 rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-black text-amber-700 shadow-sm">
-                          <input
-                            type="checkbox"
-                            checked={showEncouragementDivision}
-                            onChange={(event) =>
-                              setShowEncouragementDivision(event.target.checked)
-                            }
-                            className="h-5 w-5 accent-amber-600"
-                          />
-                          Show Division column
-                        </label>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <label className="inline-flex cursor-pointer items-center gap-3 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">
+                            <input
+                              type="checkbox"
+                              checked={showResultClass}
+                              onChange={(event) =>
+                                setShowResultClass(event.target.checked)
+                              }
+                              className="h-5 w-5 accent-emerald-600"
+                            />
+                            Show Class column
+                          </label>
+
+                          <label className="inline-flex cursor-pointer items-center gap-3 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">
+                            <input
+                              type="checkbox"
+                              checked={showResultDivision}
+                              onChange={(event) =>
+                                setShowResultDivision(event.target.checked)
+                              }
+                              className="h-5 w-5 accent-emerald-600"
+                            />
+                            Show Division column
+                          </label>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -4570,7 +4645,8 @@ export default function ReportsPage() {
                       studentProgrammeRows={studentProgrammeRows}
                       showParticipantDivision={showParticipantDivision}
                       encouragementGiftRows={encouragementGiftRows}
-                      showEncouragementDivision={showEncouragementDivision}
+                      showResultClass={showResultClass}
+                      showResultDivision={showResultDivision}
                       showChestCardDivision={showChestCardDivision}
                       chestTextDragEnabled={chestTextDragEnabled}
                       chestTextLayout={chestTextLayout}
@@ -5425,7 +5501,8 @@ function ReportBody(props: any) {
     studentProgrammeRows,
     showParticipantDivision,
     encouragementGiftRows,
-    showEncouragementDivision,
+    showResultClass,
+    showResultDivision,
     showChestCardDivision,
     chestTextDragEnabled,
     chestTextLayout,
@@ -5623,8 +5700,8 @@ function ReportBody(props: any) {
             "Student Name",
             "Gender",
             "Category",
-            "Class",
-            ...(showEncouragementDivision ? ["Division"] : []),
+            ...(showResultClass ? ["Class"] : []),
+            ...(showResultDivision ? ["Division"] : []),
             "Team",
             "Programmes",
             "Gift Given",
@@ -5637,8 +5714,8 @@ function ReportBody(props: any) {
               row.studentName,
               formatGenderScope(row.gender),
               row.categoryName,
-              row.className,
-              ...(showEncouragementDivision ? [row.divisionName || "-"] : []),
+              ...(showResultClass ? [row.className || "-"] : []),
+              ...(showResultDivision ? [row.divisionName || "-"] : []),
               row.teamName,
               row.programmeCount,
               "☐",
@@ -5682,6 +5759,8 @@ function ReportBody(props: any) {
             "Category",
             "Position",
             "Participant",
+            ...(showResultClass ? ["Class"] : []),
+            ...(showResultDivision ? ["Division"] : []),
             "Team",
             "Mark",
             "Grade",
@@ -5700,6 +5779,8 @@ function ReportBody(props: any) {
               getCategoryName(programme?.category_id || null),
               getPositionLabel(result.position),
               participant?.title || "-",
+              ...(showResultClass ? [participant?.className || "-"] : []),
+              ...(showResultDivision ? [participant?.divisionName || "-"] : []),
               getTeamName(participant?.teamId || null),
               result.total_mark,
               result.grade || "-",
@@ -5711,7 +5792,12 @@ function ReportBody(props: any) {
       )}
 
       {reportType === "top_scorers" && (
-        <TopScorersReport rows={topScorerRows} compactMode={compactMode} />
+        <TopScorersReport
+          rows={topScorerRows}
+          compactMode={compactMode}
+          showClass={showResultClass}
+          showDivision={showResultDivision}
+        />
       )}
 
       {reportType === "result_summary" && (
@@ -5742,6 +5828,8 @@ function ReportBody(props: any) {
               "Programme",
               "Position",
               "Participant",
+              ...(showResultClass ? ["Class"] : []),
+              ...(showResultDivision ? ["Division"] : []),
               "Team",
               "Mark",
               "Grade",
@@ -5755,6 +5843,8 @@ function ReportBody(props: any) {
                 programme?.name || "-",
                 getPositionLabel(result.position),
                 participant?.title || "-",
+                ...(showResultClass ? [participant?.className || "-"] : []),
+                ...(showResultDivision ? [participant?.divisionName || "-"] : []),
                 getTeamName(participant?.teamId || null),
                 result.total_mark,
                 result.grade || "-",
@@ -6662,9 +6752,13 @@ function ChestCardsReport({
 function TopScorersReport({
   rows,
   compactMode,
+  showClass,
+  showDivision,
 }: {
   rows: TopScorerRow[];
   compactMode: boolean;
+  showClass: boolean;
+  showDivision: boolean;
 }) {
   const vocalOfFest =
     rows
@@ -6727,7 +6821,8 @@ function TopScorersReport({
           "Student Name",
           "Gender",
           "Category",
-          "Class",
+          ...(showClass ? ["Class"] : []),
+          ...(showDivision ? ["Division"] : []),
           "Team",
           "Stage",
           "Off-stage",
@@ -6740,7 +6835,8 @@ function TopScorersReport({
           row.studentName,
           formatGenderScope(row.gender),
           row.categoryName,
-          row.className,
+          ...(showClass ? [row.className || "-"] : []),
+          ...(showDivision ? [row.divisionName || "-"] : []),
           row.teamName,
           row.stagePoints,
           row.offStagePoints,
