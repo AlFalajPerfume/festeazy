@@ -179,10 +179,12 @@ type ChestImageFit = "cover" | "contain";
 type RegistrationSheetMode = "blank" | "filled";
 
 type ChestTextElement =
+  | "logo"
   | "organization"
   | "event"
   | "chestLabel"
   | "chestNumber"
+  | "infoBox"
   | "studentName"
   | "details"
   | "division"
@@ -195,11 +197,47 @@ type ChestTextPosition = {
 
 type ChestTextLayout = Record<ChestTextElement, ChestTextPosition>;
 
+type ChestElementStyle = {
+  visible: boolean;
+  fontFamily: string;
+  fontScale: number;
+  fontWeight: number;
+  color: string;
+};
+
+type ChestElementStyleMap = Record<ChestTextElement, ChestElementStyle>;
+
+const CHEST_ELEMENT_LABELS: Record<ChestTextElement, string> = {
+  logo: "Organization Logo",
+  organization: "Organization Name",
+  event: "Event Title",
+  chestLabel: "Chest No Label",
+  chestNumber: "Chest Number",
+  infoBox: "Student Details Box",
+  studentName: "Student Name",
+  details: "Category / Class",
+  division: "Division",
+  team: "Team Name",
+};
+
+const CHEST_TEXT_ELEMENTS: ChestTextElement[] = [
+  "organization",
+  "event",
+  "chestLabel",
+  "chestNumber",
+  "studentName",
+  "details",
+  "division",
+  "team",
+];
+
 const DEFAULT_CHEST_TEXT_LAYOUT: ChestTextLayout = {
+  logo: { x: 0, y: 0 },
   organization: { x: 0, y: 0 },
   event: { x: 0, y: 0 },
   chestLabel: { x: 0, y: 0 },
   chestNumber: { x: 0, y: 0 },
+  infoBox: { x: 0, y: 0 },
   studentName: { x: 0, y: 0 },
   details: { x: 0, y: 0 },
   division: { x: 0, y: 0 },
@@ -208,14 +246,32 @@ const DEFAULT_CHEST_TEXT_LAYOUT: ChestTextLayout = {
 
 function createDefaultChestTextLayout(): ChestTextLayout {
   return {
+    logo: { ...DEFAULT_CHEST_TEXT_LAYOUT.logo },
     organization: { ...DEFAULT_CHEST_TEXT_LAYOUT.organization },
     event: { ...DEFAULT_CHEST_TEXT_LAYOUT.event },
     chestLabel: { ...DEFAULT_CHEST_TEXT_LAYOUT.chestLabel },
     chestNumber: { ...DEFAULT_CHEST_TEXT_LAYOUT.chestNumber },
+    infoBox: { ...DEFAULT_CHEST_TEXT_LAYOUT.infoBox },
     studentName: { ...DEFAULT_CHEST_TEXT_LAYOUT.studentName },
     details: { ...DEFAULT_CHEST_TEXT_LAYOUT.details },
     division: { ...DEFAULT_CHEST_TEXT_LAYOUT.division },
     team: { ...DEFAULT_CHEST_TEXT_LAYOUT.team },
+  };
+}
+
+function createDefaultChestElementStyles(): ChestElementStyleMap {
+  const font = DEFAULT_APP_FONT_FAMILY;
+  return {
+    logo: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 700, color: "#0f172a" },
+    organization: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 900, color: "#7c3aed" },
+    event: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 800, color: "#475569" },
+    chestLabel: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 900, color: "#64748b" },
+    chestNumber: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 900, color: "#0f172a" },
+    infoBox: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 700, color: "#0f172a" },
+    studentName: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 900, color: "#0f172a" },
+    details: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 800, color: "#475569" },
+    division: { visible: false, fontFamily: font, fontScale: 100, fontWeight: 800, color: "#64748b" },
+    team: { visible: true, fontFamily: font, fontScale: 100, fontWeight: 900, color: "#7c3aed" },
   };
 }
 
@@ -539,6 +595,15 @@ export default function ReportsPage() {
   const [chestTextLayout, setChestTextLayout] = useState<ChestTextLayout>(
     createDefaultChestTextLayout,
   );
+  const [chestElementStyles, setChestElementStyles] = useState<ChestElementStyleMap>(
+    createDefaultChestElementStyles,
+  );
+  const [selectedChestElement, setSelectedChestElement] =
+    useState<ChestTextElement>("chestNumber");
+  const [chestLogoSizeMm, setChestLogoSizeMm] = useState(8);
+  const [chestInfoBoxWidthPercent, setChestInfoBoxWidthPercent] = useState(100);
+  const [chestInfoBoxPaddingMm, setChestInfoBoxPaddingMm] = useState(3.8);
+  const [chestInfoBoxRadiusMm, setChestInfoBoxRadiusMm] = useState(6);
   const [compactMode, setCompactMode] = useState(false);
   const [chestPaperFormat, setChestPaperFormat] =
     useState<ChestPaperFormat>("a3-landscape");
@@ -1753,9 +1818,82 @@ export default function ReportsPage() {
     }));
   }
 
+  function updateChestElementStyle(
+    element: ChestTextElement,
+    patch: Partial<ChestElementStyle>,
+  ) {
+    setChestElementStyles((current) => ({
+      ...current,
+      [element]: {
+        ...current[element],
+        ...patch,
+      },
+    }));
+  }
+
+  function nudgeChestElement(
+    element: ChestTextElement,
+    deltaX: number,
+    deltaY: number,
+  ) {
+    setChestTextLayout((current) => {
+      const position = current[element] || DEFAULT_CHEST_TEXT_LAYOUT[element];
+      return {
+        ...current,
+        [element]: {
+          x: Number((position.x + deltaX).toFixed(2)),
+          y: Number((position.y + deltaY).toFixed(2)),
+        },
+      };
+    });
+  }
+
   function resetChestTextPositions() {
     setChestTextLayout(createDefaultChestTextLayout());
   }
+
+  function resetChestCardStudio() {
+    setChestTextLayout(createDefaultChestTextLayout());
+    setChestElementStyles(createDefaultChestElementStyles());
+    setShowChestCardDivision(false);
+    setChestLogoSizeMm(8);
+    setChestInfoBoxWidthPercent(100);
+    setChestInfoBoxPaddingMm(3.8);
+    setChestInfoBoxRadiusMm(6);
+    setSelectedChestElement("chestNumber");
+  }
+
+  useEffect(() => {
+    if (reportType !== "chest_cards" || !chestTextDragEnabled) return;
+
+    function handleChestStudioKeyboard(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tagName = String(target?.tagName || "").toLowerCase();
+      const isTyping =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        Boolean(target?.isContentEditable);
+
+      if (isTyping) return;
+
+      const step = event.shiftKey ? 2 : 0.5;
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (event.key === "ArrowLeft") deltaX = -step;
+      else if (event.key === "ArrowRight") deltaX = step;
+      else if (event.key === "ArrowUp") deltaY = -step;
+      else if (event.key === "ArrowDown") deltaY = step;
+      else return;
+
+      event.preventDefault();
+      nudgeChestElement(selectedChestElement, deltaX, deltaY);
+    }
+
+    window.addEventListener("keydown", handleChestStudioKeyboard);
+    return () => window.removeEventListener("keydown", handleChestStudioKeyboard);
+  }, [reportType, chestTextDragEnabled, selectedChestElement]);
 
   async function loadData(forceRefresh = false) {
     setIsLoading(true);
@@ -3425,12 +3563,18 @@ export default function ReportsPage() {
           .chest-draggable-text:active {
             outline: 2px solid rgb(124 58 237 / 0.9);
           }
+
+          .chest-draggable-selected {
+            outline: 2px solid rgb(124 58 237 / 0.92) !important;
+            outline-offset: 2px;
+            background-color: rgb(237 233 254 / 0.24);
+          }
         }
 
         @media print {
-          .chest-draggable-text {
+          .chest-draggable-text,
+          .chest-draggable-selected {
             outline: none !important;
-            background: transparent !important;
           }
         }
 
@@ -3951,55 +4095,16 @@ export default function ReportsPage() {
                   )}
 
                   {reportType === "chest_cards" && (
-                    <SelectBox label="Card Font">
-                      <FontFamilySelect
-                        value={chestFontFamily}
-                        onChange={setChestFontFamily}
-                        ariaLabel="Chest card font family"
-                        className="select-input"
-                      />
-                      <p
-                        className="mt-2 truncate text-[11px] font-bold text-slate-400"
-                        style={{ fontFamily: chestFontFamily }}
-                      >
-                        Preview: FestEazy Chest 123
-                      </p>
-                    </SelectBox>
-                  )}
-
-                  {reportType === "chest_cards" && (
-                    <div>
-                      <label className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                        Optional Details
-                      </label>
-                      <label className="inline-flex h-12 w-full cursor-pointer items-center gap-3 rounded-xl border border-violet-200 bg-violet-50/70 px-4 text-sm font-black text-violet-700 shadow-sm transition hover:bg-violet-50">
-                        <input
-                          type="checkbox"
-                          checked={showChestCardDivision}
-                          onChange={(event) =>
-                            setShowChestCardDivision(event.target.checked)
-                          }
-                          className="h-5 w-5 accent-violet-600"
-                        />
-                        Show Division on card
-                      </label>
-                      <p className="mt-2 text-[11px] font-bold leading-4 text-slate-400">
-                        Off by default. Enable only when your event uses class divisions.
-                      </p>
-                    </div>
-                  )}
-
-                  {reportType === "chest_cards" && (
                     <div className="md:col-span-2 xl:col-span-3">
-                      <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-4">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div>
                             <p className="text-sm font-black text-slate-950">
-                              Drag Text Layout
+                              Chest Card Studio
                             </p>
-                            <p className="mt-1 max-w-2xl text-xs font-bold leading-5 text-slate-500">
-                              Turn on dragging, then move any text directly on a chest card in the preview.
-                              The same position is applied to every printed card. This changes text position only.
+                            <p className="mt-1 max-w-3xl text-xs font-bold leading-5 text-slate-500">
+                              Select an element, drag it on the preview, and style each text independently.
+                              When Drag is enabled, use the keyboard arrow keys for fine movement.
                             </p>
                           </div>
 
@@ -4018,21 +4123,290 @@ export default function ReportsPage() {
 
                             <button
                               type="button"
-                              onClick={resetChestTextPositions}
+                              onClick={resetChestCardStudio}
                               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
                             >
                               <RotateCcw size={15} />
-                              Reset Positions
+                              Reset Studio
                             </button>
                           </div>
                         </div>
 
-                        {chestTextDragEnabled && (
-                          <div className="mt-3 rounded-xl border border-violet-200 bg-white px-3 py-2 text-[11px] font-bold leading-5 text-violet-700">
-                            Drag organization name, event title, “Chest No”, chest number, student name,
-                            category/class, division and team text. You can drag on any card; all cards update together.
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                          {(Object.keys(CHEST_ELEMENT_LABELS) as ChestTextElement[]).map((element) => {
+                            const style = chestElementStyles[element];
+                            const checked =
+                              element === "division"
+                                ? showChestCardDivision && style.visible
+                                : style.visible;
+
+                            return (
+                              <div
+                                key={element}
+                                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 transition ${
+                                  selectedChestElement === element
+                                    ? "border-violet-300 bg-violet-100 text-violet-800"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-violet-200"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(event) => {
+                                    const nextVisible = event.target.checked;
+                                    if (element === "division") {
+                                      setShowChestCardDivision(nextVisible);
+                                    }
+                                    updateChestElementStyle(element, { visible: nextVisible });
+                                    setSelectedChestElement(element);
+                                  }}
+                                  className="h-4 w-4 shrink-0 cursor-pointer accent-violet-600"
+                                  aria-label={`Show ${CHEST_ELEMENT_LABELS[element]}`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChestElement(element)}
+                                  className="min-w-0 flex-1 truncate text-left text-xs font-black"
+                                  title={CHEST_ELEMENT_LABELS[element]}
+                                >
+                                  {CHEST_ELEMENT_LABELS[element]}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
+                          <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
+                                Editing
+                              </p>
+                              <h3 className="mt-1 text-lg font-black text-slate-950">
+                                {CHEST_ELEMENT_LABELS[selectedChestElement]}
+                              </h3>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateChestTextPosition(selectedChestElement, { x: 0, y: 0 })
+                              }
+                              className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-600 transition hover:bg-violet-50 hover:text-violet-700"
+                            >
+                              Reset Position
+                            </button>
                           </div>
-                        )}
+
+                          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                                Position
+                              </label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">X mm</span>
+                                  <input
+                                    type="number"
+                                    step="0.25"
+                                    value={chestTextLayout[selectedChestElement].x}
+                                    onChange={(event) =>
+                                      updateChestTextPosition(selectedChestElement, {
+                                        ...chestTextLayout[selectedChestElement],
+                                        x: Number(event.target.value || 0),
+                                      })
+                                    }
+                                    className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                  />
+                                </label>
+                                <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                  <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Y mm</span>
+                                  <input
+                                    type="number"
+                                    step="0.25"
+                                    value={chestTextLayout[selectedChestElement].y}
+                                    onChange={(event) =>
+                                      updateChestTextPosition(selectedChestElement, {
+                                        ...chestTextLayout[selectedChestElement],
+                                        y: Number(event.target.value || 0),
+                                      })
+                                    }
+                                    className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                  />
+                                </label>
+                              </div>
+
+                              <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/70 px-3 py-2.5 text-[11px] font-bold leading-5 text-violet-700">
+                                Keyboard: Arrow keys move 0.5 mm. Hold Shift + Arrow to move 2 mm.
+                                Keyboard movement works while Enable Drag is on and you are not typing in a field.
+                              </div>
+                            </div>
+
+                            <div>
+                              {CHEST_TEXT_ELEMENTS.includes(selectedChestElement) ? (
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                                      Text Appearance
+                                    </label>
+                                    <FontFamilySelect
+                                      value={chestElementStyles[selectedChestElement].fontFamily}
+                                      onChange={(value) =>
+                                        updateChestElementStyle(selectedChestElement, { fontFamily: value })
+                                      }
+                                      ariaLabel={`${CHEST_ELEMENT_LABELS[selectedChestElement]} font family`}
+                                      className="select-input"
+                                    />
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Font Size</span>
+                                      <div className="mt-1 flex items-center gap-1">
+                                        <input
+                                          type="number"
+                                          min="40"
+                                          max="220"
+                                          step="5"
+                                          value={chestElementStyles[selectedChestElement].fontScale}
+                                          onChange={(event) =>
+                                            updateChestElementStyle(selectedChestElement, {
+                                              fontScale: Math.max(40, Math.min(220, Number(event.target.value || 100))),
+                                            })
+                                          }
+                                          className="w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                        />
+                                        <span className="text-xs font-black text-slate-400">%</span>
+                                      </div>
+                                    </label>
+
+                                    <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Weight</span>
+                                      <select
+                                        value={chestElementStyles[selectedChestElement].fontWeight}
+                                        onChange={(event) =>
+                                          updateChestElementStyle(selectedChestElement, {
+                                            fontWeight: Number(event.target.value),
+                                          })
+                                        }
+                                        className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                      >
+                                        <option value={400}>Regular</option>
+                                        <option value={500}>Medium</option>
+                                        <option value={600}>Semi Bold</option>
+                                        <option value={700}>Bold</option>
+                                        <option value={800}>Extra Bold</option>
+                                        <option value={900}>Black</option>
+                                      </select>
+                                    </label>
+                                  </div>
+
+                                  <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <input
+                                      type="color"
+                                      value={chestElementStyles[selectedChestElement].color}
+                                      onChange={(event) =>
+                                        updateChestElementStyle(selectedChestElement, {
+                                          color: event.target.value,
+                                        })
+                                      }
+                                      className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0"
+                                    />
+                                    <span className="text-xs font-black text-slate-600">Text Color</span>
+                                  </label>
+
+                                  <p
+                                    className="truncate rounded-xl border border-slate-100 bg-white px-3 py-2 text-sm font-bold text-slate-500"
+                                    style={{ fontFamily: chestElementStyles[selectedChestElement].fontFamily }}
+                                  >
+                                    Font preview · FestEazy 123
+                                  </p>
+                                </div>
+                              ) : selectedChestElement === "logo" ? (
+                                <div>
+                                  <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                                    Logo Size
+                                  </label>
+                                  <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                                    <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Size mm</span>
+                                    <input
+                                      type="number"
+                                      min="3"
+                                      max="30"
+                                      step="0.5"
+                                      value={chestLogoSizeMm}
+                                      onChange={(event) =>
+                                        setChestLogoSizeMm(
+                                          Math.max(3, Math.min(30, Number(event.target.value || 8))),
+                                        )
+                                      }
+                                      className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                    />
+                                  </label>
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                                    Details Box
+                                  </label>
+                                  <label className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Box Width</span>
+                                    <div className="mt-1 flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        min="40"
+                                        max="100"
+                                        step="1"
+                                        value={chestInfoBoxWidthPercent}
+                                        onChange={(event) =>
+                                          setChestInfoBoxWidthPercent(
+                                            Math.max(40, Math.min(100, Number(event.target.value || 100))),
+                                          )
+                                        }
+                                        className="w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                      />
+                                      <span className="text-xs font-black text-slate-400">%</span>
+                                    </div>
+                                  </label>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Padding mm</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="12"
+                                        step="0.25"
+                                        value={chestInfoBoxPaddingMm}
+                                        onChange={(event) =>
+                                          setChestInfoBoxPaddingMm(
+                                            Math.max(0, Math.min(12, Number(event.target.value || 0))),
+                                          )
+                                        }
+                                        className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                      />
+                                    </label>
+                                    <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Radius mm</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="20"
+                                        step="0.5"
+                                        value={chestInfoBoxRadiusMm}
+                                        onChange={(event) =>
+                                          setChestInfoBoxRadiusMm(
+                                            Math.max(0, Math.min(20, Number(event.target.value || 0))),
+                                          )
+                                        }
+                                        className="mt-1 w-full bg-transparent text-sm font-black text-slate-800 outline-none"
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -4650,6 +5024,13 @@ export default function ReportsPage() {
                       showChestCardDivision={showChestCardDivision}
                       chestTextDragEnabled={chestTextDragEnabled}
                       chestTextLayout={chestTextLayout}
+                      chestElementStyles={chestElementStyles}
+                      selectedChestElement={selectedChestElement}
+                      onChestElementSelect={setSelectedChestElement}
+                      chestLogoSizeMm={chestLogoSizeMm}
+                      chestInfoBoxWidthPercent={chestInfoBoxWidthPercent}
+                      chestInfoBoxPaddingMm={chestInfoBoxPaddingMm}
+                      chestInfoBoxRadiusMm={chestInfoBoxRadiusMm}
                       onChestTextPositionChange={updateChestTextPosition}
                       resultRows={resultRows}
                       teamPoints={teamPoints}
@@ -5506,6 +5887,13 @@ function ReportBody(props: any) {
     showChestCardDivision,
     chestTextDragEnabled,
     chestTextLayout,
+    chestElementStyles,
+    selectedChestElement,
+    onChestElementSelect,
+    chestLogoSizeMm,
+    chestInfoBoxWidthPercent,
+    chestInfoBoxPaddingMm,
+    chestInfoBoxRadiusMm,
     onChestTextPositionChange,
     resultRows,
     teamPoints,
@@ -5630,6 +6018,13 @@ function ReportBody(props: any) {
         showDivision={showChestCardDivision}
         dragEnabled={chestTextDragEnabled}
         textLayout={chestTextLayout}
+        elementStyles={chestElementStyles}
+        selectedElement={selectedChestElement}
+        onElementSelect={onChestElementSelect}
+        logoSizeMm={chestLogoSizeMm}
+        infoBoxWidthPercent={chestInfoBoxWidthPercent}
+        infoBoxPaddingMm={chestInfoBoxPaddingMm}
+        infoBoxRadiusMm={chestInfoBoxRadiusMm}
         onTextPositionChange={onChestTextPositionChange}
         cleanChest={cleanChest}
       />
@@ -6327,6 +6722,13 @@ function ChestCardsReport({
   showDivision,
   dragEnabled,
   textLayout,
+  elementStyles,
+  selectedElement,
+  onElementSelect,
+  logoSizeMm,
+  infoBoxWidthPercent,
+  infoBoxPaddingMm,
+  infoBoxRadiusMm,
   onTextPositionChange,
   cleanChest,
 }: {
@@ -6354,6 +6756,13 @@ function ChestCardsReport({
   showDivision: boolean;
   dragEnabled: boolean;
   textLayout: ChestTextLayout;
+  elementStyles: ChestElementStyleMap;
+  selectedElement: ChestTextElement;
+  onElementSelect: (element: ChestTextElement) => void;
+  logoSizeMm: number;
+  infoBoxWidthPercent: number;
+  infoBoxPaddingMm: number;
+  infoBoxRadiusMm: number;
   onTextPositionChange: (
     element: ChestTextElement,
     position: ChestTextPosition,
@@ -6517,12 +6926,29 @@ function ChestCardsReport({
 
   function dragProps(element: ChestTextElement) {
     return {
-      onPointerDown: (event: any) => startTextDrag(element, event),
+      onPointerDown: (event: any) => {
+        onElementSelect(element);
+        startTextDrag(element, event);
+      },
+      onClick: () => onElementSelect(element),
       onPointerMove: moveTextDrag,
       onPointerUp: stopTextDrag,
       onPointerCancel: stopTextDrag,
       style: getTextDragStyle(element),
-      className: dragEnabled ? "chest-draggable-text" : undefined,
+      className: dragEnabled
+        ? `chest-draggable-text ${selectedElement === element ? "chest-draggable-selected" : ""}`
+        : undefined,
+    };
+  }
+
+  function textStyle(element: ChestTextElement, baseFontSize: number) {
+    const style = elementStyles[element];
+    return {
+      ...getTextDragStyle(element),
+      fontFamily: style.fontFamily || fontFamily,
+      fontSize: `${Math.max(4, baseFontSize * (style.fontScale / 100))}px`,
+      fontWeight: style.fontWeight,
+      color: style.color,
     };
   }
 
@@ -6620,123 +7046,138 @@ function ChestCardsReport({
                   }}
                 >
                   <div className="relative z-10 flex items-center justify-center gap-2">
-                    {organization?.logo_url && (
+                    {organization?.logo_url && elementStyles.logo.visible && (
                       <img
+                        {...dragProps("logo")}
                         src={organization.logo_url}
                         alt=""
-                        className="h-8 w-8 shrink-0 rounded-md object-contain"
+                        className={`shrink-0 object-contain ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        } ${selectedElement === "logo" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                        style={{
+                          ...getTextDragStyle("logo"),
+                          width: `${logoSizeMm}mm`,
+                          height: `${logoSizeMm}mm`,
+                          borderRadius: "1.5mm",
+                        }}
                       />
                     )}
                     <div className="min-w-0 flex-1">
-                      <p
-                        {...dragProps("organization")}
-                        className={`font-black uppercase leading-[1.04] tracking-[0.06em] text-violet-700 [overflow-wrap:anywhere] ${
-                          dragEnabled ? "chest-draggable-text" : ""
-                        }`}
-                        style={{
-                          ...getTextDragStyle("organization"),
-                          fontSize: `${organizationFontSize}px`,
-                        }}
-                      >
-                        {organizationName}
-                      </p>
-                      <p
-                        {...dragProps("event")}
-                        className={`mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600 ${
-                          dragEnabled ? "chest-draggable-text" : ""
-                        }`}
-                        style={{
-                          ...getTextDragStyle("event"),
-                          fontSize: `${eventFontSize}px`,
-                        }}
-                      >
-                        {eventInfo?.title || "Event"}
-                      </p>
+                      {elementStyles.organization.visible && (
+                        <p
+                          {...dragProps("organization")}
+                          className={`uppercase leading-[1.04] tracking-[0.06em] [overflow-wrap:anywhere] ${
+                            dragEnabled ? "chest-draggable-text" : ""
+                          } ${selectedElement === "organization" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                          style={textStyle("organization", organizationFontSize)}
+                        >
+                          {organizationName}
+                        </p>
+                      )}
+                      {elementStyles.event.visible && (
+                        <p
+                          {...dragProps("event")}
+                          className={`mt-1 line-clamp-2 leading-tight ${
+                            dragEnabled ? "chest-draggable-text" : ""
+                          } ${selectedElement === "event" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                          style={textStyle("event", eventFontSize)}
+                        >
+                          {eventInfo?.title || "Event"}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="relative z-10 py-3">
-                    <p
-                      {...dragProps("chestLabel")}
-                      className={`text-[10px] font-black uppercase tracking-[0.42em] text-slate-500 ${
-                        dragEnabled ? "chest-draggable-text" : ""
-                      }`}
-                      style={getTextDragStyle("chestLabel")}
-                    >
-                      Chest No
-                    </p>
-                    <p
-                      {...dragProps("chestNumber")}
-                      className={`mt-1 font-black leading-none tracking-[-0.09em] text-slate-950 ${
-                        dragEnabled ? "chest-draggable-text" : ""
-                      }`}
-                      style={{
-                        ...getTextDragStyle("chestNumber"),
-                        fontSize: `${chestNumberFontSize}px`,
-                      }}
-                    >
-                      {cleanChest(student.chest_no)}
-                    </p>
+                    {elementStyles.chestLabel.visible && (
+                      <p
+                        {...dragProps("chestLabel")}
+                        className={`uppercase tracking-[0.42em] ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        } ${selectedElement === "chestLabel" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                        style={textStyle("chestLabel", 10)}
+                      >
+                        Chest No
+                      </p>
+                    )}
+                    {elementStyles.chestNumber.visible && (
+                      <p
+                        {...dragProps("chestNumber")}
+                        className={`mt-1 leading-none tracking-[-0.09em] ${
+                          dragEnabled ? "chest-draggable-text" : ""
+                        } ${selectedElement === "chestNumber" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                        style={textStyle("chestNumber", chestNumberFontSize)}
+                      >
+                        {cleanChest(student.chest_no)}
+                      </p>
+                    )}
                   </div>
 
                   <div
-                    className="relative z-10 rounded-3xl bg-white/80 shadow-sm ring-1 ring-slate-200/80 backdrop-blur"
+                    {...dragProps("infoBox")}
+                    className={`relative z-10 ${
+                      elementStyles.infoBox.visible
+                        ? "bg-white/80 shadow-sm ring-1 ring-slate-200/80 backdrop-blur"
+                        : "bg-transparent"
+                    } ${dragEnabled ? "chest-draggable-text" : ""} ${
+                      selectedElement === "infoBox" && dragEnabled ? "chest-draggable-selected" : ""
+                    }`}
                     style={{
-                      padding: `${Math.max(2.8, 3.8 * contentScale)}mm ${Math.max(2.4, 3.5 * widthScale)}mm`,
+                      ...getTextDragStyle("infoBox"),
+                      width: `${Math.max(40, Math.min(100, infoBoxWidthPercent))}%`,
+                      alignSelf: "center",
+                      padding: `${Math.max(0, infoBoxPaddingMm)}mm ${Math.max(0, infoBoxPaddingMm)}mm`,
+                      borderRadius: `${Math.max(0, infoBoxRadiusMm)}mm`,
                     }}
                   >
-                    <p
-                      {...dragProps("studentName")}
-                      className={`line-clamp-2 min-h-[2.35em] font-black leading-[1.12] tracking-[-0.025em] text-slate-950 ${
-                        dragEnabled ? "chest-draggable-text" : ""
-                      }`}
-                      style={{
-                        ...getTextDragStyle("studentName"),
-                        fontSize: `${participantFontSize}px`,
-                      }}
-                    >
-                      {student.name}
-                    </p>
-                    <p
-                      {...dragProps("details")}
-                      className={`mt-1 line-clamp-2 font-extrabold leading-tight text-slate-600 ${
-                        dragEnabled ? "chest-draggable-text" : ""
-                      }`}
-                      style={{
-                        ...getTextDragStyle("details"),
-                        fontSize: `${detailFontSize}px`,
-                      }}
-                    >
-                      {categoryName} · {className}
-                    </p>
-                    {showDivision && divisionName !== "-" && (
+                    {elementStyles.studentName.visible && (
                       <p
-                        {...dragProps("division")}
-                        className={`mt-1 line-clamp-1 font-extrabold leading-tight text-slate-500 ${
+                        {...dragProps("studentName")}
+                        className={`line-clamp-2 min-h-[2.35em] leading-[1.12] tracking-[-0.025em] ${
                           dragEnabled ? "chest-draggable-text" : ""
-                        }`}
-                        style={{
-                          ...getTextDragStyle("division"),
-                          fontSize: `${Math.max(8, detailFontSize - 1)}px`,
-                        }}
+                        } ${selectedElement === "studentName" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                        style={textStyle("studentName", participantFontSize)}
                       >
-                        Division: {divisionName}
+                        {student.name}
                       </p>
                     )}
-                    <div className="chest-cut-line mt-3 pt-3">
+                    {elementStyles.details.visible && (
                       <p
-                        {...dragProps("team")}
-                        className={`line-clamp-2 font-black uppercase leading-tight tracking-[0.14em] text-violet-700 ${
+                        {...dragProps("details")}
+                        className={`mt-1 line-clamp-2 leading-tight ${
                           dragEnabled ? "chest-draggable-text" : ""
-                        }`}
-                        style={{
-                          ...getTextDragStyle("team"),
-                          fontSize: `${teamFontSize}px`,
-                        }}
+                        } ${selectedElement === "details" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                        style={textStyle("details", detailFontSize)}
                       >
-                        {teamName}
+                        {categoryName} · {className}
                       </p>
-                    </div>
+                    )}
+                    {showDivision &&
+                      divisionName !== "-" &&
+                      elementStyles.division.visible && (
+                        <p
+                          {...dragProps("division")}
+                          className={`mt-1 line-clamp-1 leading-tight ${
+                            dragEnabled ? "chest-draggable-text" : ""
+                          } ${selectedElement === "division" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                          style={textStyle("division", Math.max(8, detailFontSize - 1))}
+                        >
+                          Division: {divisionName}
+                        </p>
+                      )}
+                    {elementStyles.team.visible && (
+                      <div className="chest-cut-line mt-3 pt-3">
+                        <p
+                          {...dragProps("team")}
+                          className={`line-clamp-2 uppercase leading-tight tracking-[0.14em] ${
+                            dragEnabled ? "chest-draggable-text" : ""
+                          } ${selectedElement === "team" && dragEnabled ? "chest-draggable-selected" : ""}`}
+                          style={textStyle("team", teamFontSize)}
+                        >
+                          {teamName}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
