@@ -843,15 +843,12 @@ export default function LiveResultsPage() {
 
   if (loadingError || !eventInfo || !organization) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#050816] px-5 text-white">
-        <div className="w-full max-w-xl rounded-[2rem] border border-white/10 bg-white/[0.05] p-8 text-center shadow-2xl backdrop-blur-xl">
-          <WifiOff className="mx-auto text-rose-300" size={42} />
-          <h1 className="mt-5 text-3xl font-black tracking-[-0.05em]">
-            Live Results Unavailable
-          </h1>
-          <p className="mt-3 text-sm font-bold leading-6 text-slate-300">
-            {loadingError || "This public event is not available."}
-          </p>
+      <main className="tv-root tv-center-screen" style={{ backgroundColor: theme.deep }}>
+        <style jsx global>{TV_SAFE_CSS}</style>
+        <div className="tv-error-card">
+          <WifiOff size={42} />
+          <h1>Live Results Unavailable</h1>
+          <p>{loadingError || "This public event is not available."}</p>
         </div>
       </main>
     );
@@ -864,23 +861,6 @@ export default function LiveResultsPage() {
         : `${formatDate(eventInfo.start_date)} – ${formatDate(eventInfo.end_date)}`
       : formatDate(eventInfo.start_date || eventInfo.end_date);
 
-  const cssVars = {
-    "--live-primary": theme.primary,
-    "--live-bright": theme.bright,
-    "--live-light": theme.light,
-    "--live-deep": theme.deep,
-    "--live-deep-2": theme.deep2,
-    "--live-glow": theme.glow,
-  } as CSSProperties;
-
-  const sceneClass = isLeaving
-    ? slideDirection === "next"
-      ? "live-scene-exit-next"
-      : "live-scene-exit-prev"
-    : slideDirection === "next"
-      ? "live-scene-enter-next"
-      : "live-scene-enter-prev";
-
   const studentLookupQrUrl = studentLookupUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=${encodeURIComponent(
         studentLookupUrl,
@@ -889,178 +869,77 @@ export default function LiveResultsPage() {
 
   return (
     <main
-      className="relative min-h-[100dvh] overflow-hidden bg-[#050816] text-white"
-      style={cssVars}
+      className="tv-root"
+      style={{
+        backgroundColor: theme.deep,
+        backgroundImage: `linear-gradient(135deg, ${theme.deep} 0%, #07101f 52%, ${theme.deep2} 100%)`,
+      }}
     >
-      <style jsx global>{`
-        @keyframes liveAuroraA {
-          0%, 100% { transform: translate3d(-4%, -3%, 0) scale(1); opacity: .7; }
-          50% { transform: translate3d(8%, 7%, 0) scale(1.18); opacity: 1; }
-        }
-        @keyframes liveAuroraB {
-          0%, 100% { transform: translate3d(5%, 4%, 0) scale(1.1); opacity: .45; }
-          50% { transform: translate3d(-8%, -5%, 0) scale(.95); opacity: .75; }
-        }
-        @keyframes liveSceneEnterNext {
-          0% { opacity: 0; transform: translate3d(70px, 0, 0) scale(.982); filter: blur(10px); }
-          100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
-        }
-        @keyframes liveSceneEnterPrev {
-          0% { opacity: 0; transform: translate3d(-70px, 0, 0) scale(.982); filter: blur(10px); }
-          100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
-        }
-        @keyframes liveSceneExitNext {
-          0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
-          100% { opacity: 0; transform: translate3d(-55px, 0, 0) scale(.988); filter: blur(8px); }
-        }
-        @keyframes liveSceneExitPrev {
-          0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
-          100% { opacity: 0; transform: translate3d(55px, 0, 0) scale(.988); filter: blur(8px); }
-        }
-        @keyframes liveWinnerRise {
-          0% { opacity: 0; transform: translateY(34px) scale(.97); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes liveShine {
-          0% { transform: translateX(-140%) skewX(-20deg); opacity: 0; }
-          35% { opacity: .7; }
-          70%, 100% { transform: translateX(190%) skewX(-20deg); opacity: 0; }
-        }
-        @keyframes livePulseDot {
-          0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,.45); }
-          50% { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
-        }
-        @keyframes liveTimer {
-          from { transform: scaleX(0); }
-          to { transform: scaleX(1); }
-        }
-        @keyframes liveRingGlow {
-          0%,100% { filter: drop-shadow(0 0 14px var(--live-glow)); }
-          50% { filter: drop-shadow(0 0 34px var(--live-glow)); }
-        }
-        .live-scene-enter-next { animation: liveSceneEnterNext .72s cubic-bezier(.16,.82,.23,1) both; }
-        .live-scene-enter-prev { animation: liveSceneEnterPrev .72s cubic-bezier(.16,.82,.23,1) both; }
-        .live-scene-exit-next { animation: liveSceneExitNext ${TRANSITION_MS}ms cubic-bezier(.5,0,.8,.2) both; }
-        .live-scene-exit-prev { animation: liveSceneExitPrev ${TRANSITION_MS}ms cubic-bezier(.5,0,.8,.2) both; }
-        .live-winner-rise { animation: liveWinnerRise .72s cubic-bezier(.16,.82,.23,1) both; }
-        .live-timer { transform-origin: left; animation: liveTimer ${ROTATE_INTERVAL_MS}ms linear both; }
-        .live-timer-paused { animation-play-state: paused; }
-        .live-pulse-dot { animation: livePulseDot 1.8s ease-in-out infinite; }
-        .live-ring-glow { animation: liveRingGlow 3s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) {
-          .live-scene-enter-next,.live-scene-enter-prev,.live-scene-exit-next,.live-scene-exit-prev,
-          .live-winner-rise,.live-timer,.live-pulse-dot,.live-ring-glow { animation: none !important; }
-        }
-      `}</style>
+      <style jsx global>{TV_SAFE_CSS}</style>
 
-      <div
-        className="pointer-events-none fixed -left-[16vw] -top-[28vh] h-[72vh] w-[72vw] rounded-full blur-[120px]"
-        style={{ background: theme.glow, animation: "liveAuroraA 14s ease-in-out infinite" }}
-      />
-      <div
-        className="pointer-events-none fixed -bottom-[34vh] -right-[12vw] h-[82vh] w-[62vw] rounded-full blur-[140px]"
-        style={{ background: `${theme.primary}4D`, animation: "liveAuroraB 17s ease-in-out infinite" }}
-      />
-      <div
-        className="pointer-events-none fixed inset-0 opacity-[0.16]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px)",
-          backgroundSize: "52px 52px",
-          maskImage: "linear-gradient(to bottom, black, transparent 82%)",
-        }}
-      />
-      <div
-        className="pointer-events-none fixed inset-0"
-        style={{
-          background: `linear-gradient(135deg, ${theme.deep}E8 0%, #060914E8 48%, ${theme.deep2}B8 100%)`,
-        }}
-      />
+      <div className="tv-shell">
+        <header className="tv-header">
+          <div className="tv-brand">
+            <div className="tv-org-logo" style={{ borderColor: theme.primary }}>
+              {organization.logo_url ? (
+                <img src={organization.logo_url} alt={organization.name} />
+              ) : (
+                <Trophy size={30} color={theme.primary} />
+              )}
+            </div>
 
-      <div className="relative z-10 flex min-h-[100dvh] flex-col">
-        <header className="flex h-[92px] shrink-0 items-center border-b border-white/[0.08] bg-white/[0.025] px-5 backdrop-blur-2xl sm:px-8 lg:px-12">
-          <div className="mx-auto flex w-full max-w-[1880px] items-center justify-between gap-6">
-            <div className="flex min-w-0 items-center gap-4">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[1.15rem] border border-white/15 bg-white shadow-2xl sm:h-16 sm:w-16">
-                {organization.logo_url ? (
-                  <img
-                    src={organization.logo_url}
-                    alt={organization.name}
-                    className="h-full w-full object-contain p-1.5"
-                  />
-                ) : (
-                  <Trophy className="text-[var(--live-primary)]" size={28} />
-                )}
+            <div className="tv-brand-copy">
+              <div className="tv-eyebrow">
+                {organization.name} <span>•</span> Live Results
               </div>
+              <div className="tv-title">{eventInfo.title}</div>
+            </div>
+          </div>
 
-              <div className="min-w-0">
-                <p className="truncate text-[10px] font-black uppercase tracking-[0.24em] text-white/45 sm:text-xs">
-                  {organization.name} <span className="text-white/20">•</span> Live Results
-                </p>
-                <h1 className="mt-1 truncate text-2xl font-black tracking-[-0.055em] sm:text-3xl">
-                  {eventInfo.title}
-                </h1>
+          <div className="tv-header-actions">
+            <div className={`tv-status ${isOnline ? "online" : "offline"}`}>
+              <span className="tv-status-dot" />
+              {isOnline ? "Live Sync" : "Reconnecting"}
+            </div>
+
+            <div className="tv-clock-box">
+              <div className="tv-clock">{formatTime(clock)}</div>
+              <div className="tv-clock-date">
+                {clock.toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                })}
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2.5">
-              <div
-                className={`hidden items-center gap-2 rounded-full border px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.15em] md:flex ${
-                  isOnline
-                    ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-200"
-                    : "border-rose-300/20 bg-rose-400/10 text-rose-200"
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${isOnline ? "live-pulse-dot bg-emerald-300" : "bg-rose-300"}`} />
-                {isOnline ? "Live Sync" : "Reconnecting"}
-              </div>
+            <ControlButton
+              title={isPaused ? "Resume rotation" : "Pause rotation"}
+              onClick={() => {
+                setIsPaused((current) => !current);
+                setRotationEpoch((value) => value + 1);
+              }}
+            >
+              {isPaused ? <Play size={18} /> : <Pause size={18} />}
+            </ControlButton>
 
-              <div className="hidden rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-2.5 text-right sm:block">
-                <p className="text-lg font-black tabular-nums tracking-[-0.04em]">
-                  {formatTime(clock)}
-                </p>
-                <p className="text-[9px] font-black uppercase tracking-[0.17em] text-white/35">
-                  {clock.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                </p>
-              </div>
-
-              <ControlButton
-                title={isPaused ? "Resume rotation" : "Pause rotation"}
-                onClick={() => {
-                  setIsPaused((current) => !current);
-                  setRotationEpoch((value) => value + 1);
-                }}
-              >
-                {isPaused ? <Play size={19} /> : <Pause size={19} />}
-              </ControlButton>
-
-              <ControlButton
-                title={isFullscreen ? "Exit fullscreen" : "Open fullscreen"}
-                onClick={toggleFullscreen}
-              >
-                {isFullscreen ? <Minimize2 size={19} /> : <Expand size={19} />}
-              </ControlButton>
-            </div>
+            <ControlButton
+              title={isFullscreen ? "Exit fullscreen" : "Open fullscreen"}
+              onClick={toggleFullscreen}
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Expand size={18} />}
+            </ControlButton>
           </div>
         </header>
 
-        <section className="relative mx-auto flex w-full max-w-[1880px] flex-1 items-stretch px-4 py-4 sm:px-7 sm:py-6 lg:px-10 lg:py-7">
-          <div className="relative min-h-[620px] w-full overflow-hidden rounded-[2.5rem] border border-white/[0.09] bg-white/[0.045] shadow-[0_34px_110px_rgba(0,0,0,.38)] backdrop-blur-2xl">
-            <div
-              className="absolute inset-x-0 top-0 z-30 h-[2px] opacity-80"
-              style={{ background: `linear-gradient(90deg, transparent, ${theme.bright}, transparent)` }}
-            />
-
+        <section className="tv-stage-wrap">
+          <div className="tv-stage" style={{ borderColor: `${theme.primary}66` }}>
             {newResultPulse && displayedIndex === 0 && (
-              <div
-                className="pointer-events-none absolute inset-0 z-20 rounded-[2.5rem] border-2"
-                style={{ borderColor: theme.bright, boxShadow: `inset 0 0 100px ${theme.glow}, 0 0 80px ${theme.glow}` }}
-              />
+              <div className="tv-new-result-ring" style={{ borderColor: theme.bright }} />
             )}
 
             <div
               key={`${activeSlide?.id || "none"}-${displayedIndex}-${rotationEpoch}`}
-              className={`absolute inset-0 ${sceneClass}`}
+              className={`tv-scene ${isLeaving ? "tv-scene-leaving" : "tv-scene-entering"}`}
             >
               {activeSlide?.kind === "result" && (
                 <ResultScene
@@ -1093,127 +972,313 @@ export default function LiveResultsPage() {
               )}
             </div>
 
-            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-30 h-1 bg-white/[0.055]">
-              {!isPaused && slides.length > 1 && (
+            {!isPaused && slides.length > 1 && (
+              <div className="tv-timer-track">
                 <div
                   key={`timer-${activeSlide?.id}-${displayedIndex}-${rotationEpoch}`}
-                  className="live-timer h-full"
-                  style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.bright})` }}
+                  className="tv-timer-bar"
+                  style={{
+                    backgroundColor: theme.bright,
+                    animationDuration: `${ROTATE_INTERVAL_MS}ms`,
+                  }}
                 />
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </section>
 
-        <footer className="shrink-0 px-5 pb-4 sm:px-8 lg:px-12">
-          <div className="mx-auto flex max-w-[1880px] items-center justify-between gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 backdrop-blur-xl sm:px-5">
-            <div className="flex min-w-0 items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/35 sm:text-xs">
-              {eventDate && <span className="hidden md:block">{eventDate}</span>}
-              {eventInfo.venue && <span className="hidden h-1 w-1 rounded-full bg-white/20 lg:block" />}
-              {eventInfo.venue && (
-                <span className="hidden min-w-0 items-center gap-1.5 truncate lg:flex">
-                  <MapPin size={13} /> {eventInfo.venue}
-                </span>
-              )}
-            </div>
+        <footer className="tv-footer">
+          <div className="tv-footer-left">
+            {eventDate && <span>{eventDate}</span>}
+            {eventInfo.venue && (
+              <span className="tv-venue"><MapPin size={13} /> {eventInfo.venue}</span>
+            )}
+          </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={showPrevious}
-                disabled={slides.length <= 1 || isLeaving}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.055] text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                title="Previous scene"
-              >
-                <ChevronLeft size={17} />
-              </button>
+          <div className="tv-nav">
+            <button
+              type="button"
+              onClick={showPrevious}
+              disabled={slides.length <= 1 || isLeaving}
+              className="tv-nav-button"
+              title="Previous scene"
+            >
+              <ChevronLeft size={18} />
+            </button>
 
-              <div className="flex items-center gap-1.5 px-2">
-                {slides.slice(0, 10).map((slide, index) => (
-                  <button
-                    key={slide.id}
-                    type="button"
-                    onClick={() => changeSlide(index, index >= displayedIndex ? "next" : "prev")}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      index === displayedIndex ? "w-8 bg-white" : "w-2 bg-white/20 hover:bg-white/40"
-                    }`}
-                    title={`Scene ${index + 1}`}
-                  />
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={showNext}
-                disabled={slides.length <= 1 || isLeaving}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.055] text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                title="Next scene"
-              >
-                <ChevronRight size={17} />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="hidden items-center gap-3 xl:flex">
-                <div className="text-right">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">
-                    Student Lookup
-                  </p>
-                  <p className="mt-1 text-[10px] font-black uppercase tracking-[0.08em] text-white/60">
-                    Scan to find programmes
-                  </p>
-                </div>
-
-                {studentLookupQrUrl && (
-                  <a
-                    href={studentLookupUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex h-[70px] w-[70px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)] transition hover:scale-[1.03]"
-                    title="Open Student Lookup"
-                  >
-                    <img
-                      src={studentLookupQrUrl}
-                      alt="QR code for Student Lookup"
-                      className="h-full w-full object-contain"
-                    />
-                  </a>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.14em] text-white/35 sm:text-xs">
+            <div className="tv-dots">
+              {slides.slice(0, 10).map((slide, index) => (
                 <button
+                  key={slide.id}
                   type="button"
-                  onClick={() => void refreshLiveResults()}
-                  disabled={isRefreshing}
-                  className="hidden items-center gap-2 transition hover:text-white/70 sm:flex"
-                  title="Refresh now"
-                >
-                  <RefreshCcw className={isRefreshing ? "animate-spin" : ""} size={13} />
-                  <span>
-                    Updated {lastUpdated
-                      ? lastUpdated.toLocaleTimeString("en-IN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        })
-                      : "—"}
-                  </span>
-                </button>
-                <span className="hidden h-1 w-1 rounded-full bg-white/20 sm:block" />
-                <span className="hidden text-white/30 lg:inline">Auto 10s</span>
-                <span className="hidden h-1 w-1 rounded-full bg-white/20 lg:block" />
-                <span className="flex items-center gap-2">
-                  <Radio size={13} className="text-[var(--live-bright)]" /> FestEazy
-                </span>
-              </div>
+                  onClick={() => changeSlide(index, index >= displayedIndex ? "next" : "prev")}
+                  className={`tv-dot ${index === displayedIndex ? "active" : ""}`}
+                  title={`Scene ${index + 1}`}
+                />
+              ))}
             </div>
+
+            <button
+              type="button"
+              onClick={showNext}
+              disabled={slides.length <= 1 || isLeaving}
+              className="tv-nav-button"
+              title="Next scene"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          <div className="tv-footer-right">
+            {studentLookupQrUrl && (
+              <a
+                href={studentLookupUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="tv-qr-link"
+                title="Open Student Lookup"
+              >
+                <span className="tv-qr-copy">
+                  <strong>Student Lookup</strong>
+                  <small>Scan to find programmes</small>
+                </span>
+                <img src={studentLookupQrUrl} alt="Student Lookup QR" />
+              </a>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void refreshLiveResults()}
+              disabled={isRefreshing}
+              className="tv-refresh-button"
+              title="Refresh now"
+            >
+              <RefreshCcw size={14} />
+              <span>
+                {lastUpdated
+                  ? lastUpdated.toLocaleTimeString("en-IN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })
+                  : "Refresh"}
+              </span>
+            </button>
           </div>
         </footer>
       </div>
     </main>
   );
 }
+
+const TV_SAFE_CSS = `
+  html, body { margin: 0; padding: 0; background: #050816; }
+  *, *:before, *:after { box-sizing: border-box; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; opacity: .4; }
+
+  .tv-root {
+    width: 100%;
+    min-height: 100vh;
+    color: #ffffff;
+    overflow: hidden;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .tv-shell { min-height: 100vh; display: flex; flex-direction: column; }
+  .tv-center-screen { display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .tv-error-card {
+    width: 100%; max-width: 620px; padding: 34px; text-align: center;
+    border: 1px solid #334155; border-radius: 28px; background: #0f172a;
+  }
+  .tv-error-card h1 { margin: 18px 0 0; font-size: 34px; }
+  .tv-error-card p { margin: 12px 0 0; color: #cbd5e1; font-weight: 700; line-height: 1.6; }
+
+  .tv-header {
+    height: 92px; min-height: 92px; padding: 12px 42px; display: flex;
+    align-items: center; justify-content: space-between; border-bottom: 1px solid #263244;
+    background: #08101c;
+  }
+  .tv-brand { min-width: 0; display: flex; align-items: center; }
+  .tv-org-logo {
+    width: 64px; height: 64px; min-width: 64px; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; border: 2px solid #334155; border-radius: 16px;
+    background: #ffffff; margin-right: 16px;
+  }
+  .tv-org-logo img { width: 100%; height: 100%; object-fit: contain; padding: 4px; display: block; }
+  .tv-brand-copy { min-width: 0; }
+  .tv-eyebrow { color: #9fb0c6; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-eyebrow span { color: #54657c; }
+  .tv-title { margin-top: 5px; max-width: 840px; font-size: 28px; line-height: 1.05; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .tv-header-actions { display: flex; align-items: center; margin-left: 20px; }
+  .tv-status { display: flex; align-items: center; height: 40px; padding: 0 14px; border: 1px solid #334155; border-radius: 20px; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; margin-right: 10px; }
+  .tv-status.online { color: #a7f3d0; background: #0d2b25; }
+  .tv-status.offline { color: #fecdd3; background: #33131c; }
+  .tv-status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 8px; }
+  .tv-clock-box { min-width: 108px; padding: 7px 12px; border: 1px solid #263244; border-radius: 14px; background: #101a29; text-align: right; margin-right: 10px; }
+  .tv-clock { font-size: 18px; font-weight: 900; }
+  .tv-clock-date { margin-top: 2px; color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-control-button {
+    width: 46px; height: 46px; margin-left: 8px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid #334155; border-radius: 13px; background: #101a29; color: #ffffff;
+  }
+
+  .tv-stage-wrap { flex: 1; min-height: 0; padding: 20px 34px; display: flex; }
+  .tv-stage {
+    position: relative; width: 100%; min-height: 560px; overflow: hidden; border: 1px solid #2c3d53;
+    border-radius: 30px; background: #0a1321;
+  }
+  .tv-scene { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+  .tv-scene-entering { animation: tvSceneIn .45s ease-out both; }
+  .tv-scene-leaving { animation: tvSceneOut ${TRANSITION_MS}ms ease-in both; }
+  .tv-new-result-ring { position: absolute; left: 4px; top: 4px; right: 4px; bottom: 4px; z-index: 5; pointer-events: none; border: 2px solid; border-radius: 26px; }
+  @keyframes tvSceneIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes tvSceneOut { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes tvTimer { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  .tv-timer-track { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: #172233; z-index: 8; }
+  .tv-timer-bar { width: 100%; height: 100%; transform-origin: left center; animation-name: tvTimer; animation-timing-function: linear; animation-fill-mode: both; }
+
+  .tv-scene-inner { height: 100%; min-height: 560px; padding: 36px 48px; display: flex; flex-direction: column; }
+  .tv-scene-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .tv-scene-kicker { display: inline-block; padding: 8px 13px; border: 1px solid #334155; border-radius: 18px; background: #101a29; color: #d7e0eb; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.6px; }
+  .tv-scene-title { margin: 16px 0 0; max-width: 1200px; font-size: 58px; line-height: .96; font-weight: 900; text-transform: uppercase; letter-spacing: -2px; }
+  .tv-scene-meta { margin-top: 12px; color: #93a4ba; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-published { min-width: 128px; padding: 12px 14px; border: 1px solid #263244; border-radius: 14px; background: #101a29; text-align: right; }
+  .tv-published small { display: block; color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-published strong { display: block; margin-top: 3px; font-size: 19px; }
+
+  .tv-podium { flex: 1; min-height: 0; display: flex; align-items: flex-end; justify-content: center; margin-top: 24px; }
+  .tv-podium-card {
+    width: 32%; min-height: 245px; margin: 0 7px; padding: 22px; display: flex; flex-direction: column;
+    border: 1px solid #2b3a4d; border-radius: 24px; background: #111c2a;
+  }
+  .tv-podium-card.featured { min-height: 292px; border-width: 2px; background: #142235; }
+  .tv-podium-card.empty { align-items: center; justify-content: center; color: #58697f; }
+  .tv-medal-row { display: flex; align-items: center; justify-content: space-between; }
+  .tv-medal { font-size: 38px; }
+  .tv-position-pill { padding: 6px 9px; border: 1px solid #334155; border-radius: 16px; color: #9fb0c6; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-podium-copy { margin-top: auto; padding-top: 18px; }
+  .tv-chest { margin: 0; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.4px; }
+  .tv-winner-name { margin: 6px 0 0; font-size: 29px; line-height: 1; font-weight: 900; text-transform: uppercase; }
+  .tv-podium-card.featured .tv-winner-name { font-size: 36px; }
+  .tv-member-list { margin: 10px 0 0; color: #9aaac0; font-size: 11px; line-height: 1.45; font-weight: 700; }
+  .tv-team-line { margin-top: 15px; padding-top: 13px; border-top: 1px solid #2a384b; display: flex; align-items: center; justify-content: space-between; }
+  .tv-team-name { min-width: 0; display: flex; align-items: center; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+  .tv-team-name img { width: 30px; height: 30px; object-fit: contain; background: #ffffff; border-radius: 8px; padding: 2px; margin-right: 8px; }
+  .tv-team-color { width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; }
+  .tv-grade { color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+
+  .tv-standings-list { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: center; margin: 20px -7px 0; }
+  .tv-standing-row { width: calc(50% - 14px); margin: 7px; padding: 18px; display: flex; align-items: center; border: 1px solid #2a3a4e; border-radius: 20px; background: #111c2a; }
+  .tv-standing-rank { width: 54px; height: 54px; min-width: 54px; margin-right: 14px; display: flex; align-items: center; justify-content: center; border: 1px solid #334155; border-radius: 16px; background: #152234; font-size: 25px; font-weight: 900; }
+  .tv-standing-main { flex: 1; min-width: 0; }
+  .tv-standing-title { display: flex; align-items: center; min-width: 0; }
+  .tv-standing-title img { width: 34px; height: 34px; object-fit: contain; background: #fff; border-radius: 8px; padding: 2px; margin-right: 9px; }
+  .tv-standing-title h3 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 24px; text-transform: uppercase; }
+  .tv-standing-bar { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 4px; background: #1b293a; }
+  .tv-standing-bar span { display: block; height: 100%; }
+  .tv-standing-points { min-width: 92px; margin-left: 14px; text-align: right; }
+  .tv-standing-points strong { display: block; font-size: 35px; }
+  .tv-standing-points small { color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; }
+
+  .tv-progress-layout { flex: 1; min-height: 0; display: flex; align-items: center; }
+  .tv-progress-big { width: 36%; text-align: center; }
+  .tv-progress-circle { width: 300px; height: 300px; max-width: 90%; margin: 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 18px solid #243247; border-radius: 50%; background: #0c1624; }
+  .tv-progress-circle strong { font-size: 82px; line-height: 1; }
+  .tv-progress-circle span { margin-top: 8px; color: #93a4ba; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-progress-copy { width: 64%; padding-left: 38px; }
+  .tv-progress-copy h2 { margin: 14px 0 0; font-size: 52px; line-height: 1; text-transform: uppercase; }
+  .tv-progress-copy > p { margin: 10px 0 0; color: #93a4ba; font-weight: 700; }
+  .tv-metrics { display: flex; margin: 22px -5px 0; }
+  .tv-metric { width: 33.333%; margin: 5px; padding: 17px; border: 1px solid #2a394d; border-radius: 18px; background: #101a29; }
+  .tv-metric small { display: block; color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-metric strong { display: block; margin-top: 5px; font-size: 32px; }
+  .tv-metric span { display: block; margin-top: 3px; color: #708198; font-size: 10px; font-weight: 700; }
+  .tv-two-cards { display: flex; margin: 8px -5px 0; }
+  .tv-small-card { width: 50%; margin: 5px; padding: 16px; border: 1px solid #2a394d; border-radius: 18px; background: #101a29; }
+  .tv-small-card small { color: #7f90a7; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-small-card strong { display: block; margin-top: 6px; font-size: 18px; text-transform: uppercase; }
+  .tv-small-card span { display: block; margin-top: 5px; color: #8697ad; font-size: 11px; }
+
+  .tv-waiting { height: 100%; min-height: 560px; display: flex; align-items: center; justify-content: center; padding: 40px; text-align: center; }
+  .tv-waiting-inner { max-width: 900px; }
+  .tv-waiting-icon { width: 88px; height: 88px; margin: 0 auto; display: flex; align-items: center; justify-content: center; border: 1px solid #334155; border-radius: 24px; background: #111c2a; }
+  .tv-waiting-kicker { margin-top: 24px; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; }
+  .tv-waiting h2 { margin: 12px 0 0; font-size: 56px; line-height: 1; text-transform: uppercase; }
+  .tv-waiting p { margin: 18px auto 0; max-width: 650px; color: #93a4ba; font-size: 15px; line-height: 1.6; font-weight: 700; }
+  .tv-waiting-status { display: inline-flex; align-items: center; margin-top: 24px; padding: 11px 16px; border: 1px solid #334155; border-radius: 20px; background: #101a29; color: #b8c4d4; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-waiting-status i { width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: #6ee7b7; }
+
+  .tv-footer { min-height: 76px; padding: 8px 34px 14px; display: flex; align-items: center; justify-content: space-between; }
+  .tv-footer-left, .tv-footer-right, .tv-nav { display: flex; align-items: center; }
+  .tv-footer-left { width: 32%; color: #8798ad; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-footer-left > span { margin-right: 16px; }
+  .tv-venue { display: flex; align-items: center; }
+  .tv-nav { justify-content: center; }
+  .tv-nav-button { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border: 1px solid #334155; border-radius: 11px; background: #101a29; color: #ffffff; }
+  .tv-dots { display: flex; align-items: center; padding: 0 8px; }
+  .tv-dot { width: 8px; height: 8px; margin: 0 3px; padding: 0; border: 0; border-radius: 5px; background: #42536a; }
+  .tv-dot.active { width: 28px; background: #ffffff; }
+  .tv-footer-right { width: 32%; justify-content: flex-end; }
+  .tv-qr-link { display: flex; align-items: center; color: #ffffff; text-decoration: none; margin-right: 14px; }
+  .tv-qr-copy { text-align: right; margin-right: 8px; }
+  .tv-qr-copy strong { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; }
+  .tv-qr-copy small { display: block; margin-top: 2px; color: #7f90a7; font-size: 9px; }
+  .tv-qr-link img { width: 58px; height: 58px; background: #fff; padding: 3px; border-radius: 8px; }
+  .tv-refresh-button { height: 38px; display: flex; align-items: center; border: 0; background: transparent; color: #93a4ba; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+  .tv-refresh-button svg { margin-right: 6px; }
+
+  @media (max-width: 1200px) {
+    .tv-header { padding-left: 24px; padding-right: 24px; }
+    .tv-status, .tv-qr-link { display: none; }
+    .tv-stage-wrap { padding-left: 22px; padding-right: 22px; }
+    .tv-scene-inner { padding: 30px 34px; }
+    .tv-scene-title { font-size: 48px; }
+    .tv-winner-name { font-size: 24px; }
+    .tv-podium-card.featured .tv-winner-name { font-size: 30px; }
+    .tv-progress-copy h2 { font-size: 44px; }
+  }
+  @media (max-width: 900px) {
+    .tv-header { height: 80px; min-height: 80px; }
+    .tv-org-logo { width: 54px; height: 54px; min-width: 54px; }
+    .tv-title { font-size: 21px; max-width: 450px; }
+    .tv-clock-box { display: none; }
+    .tv-stage { min-height: 500px; }
+    .tv-scene-inner, .tv-waiting { min-height: 500px; }
+    .tv-scene-title { font-size: 38px; }
+    .tv-podium { align-items: stretch; }
+    .tv-podium-card, .tv-podium-card.featured { min-height: 220px; }
+    .tv-standing-row { width: calc(100% - 14px); }
+    .tv-progress-big { width: 32%; }
+    .tv-progress-copy { width: 68%; padding-left: 24px; }
+    .tv-progress-circle { width: 220px; height: 220px; border-width: 12px; }
+    .tv-progress-circle strong { font-size: 58px; }
+    .tv-footer-left { display: none; }
+    .tv-footer-right { width: auto; }
+    .tv-nav { margin-left: auto; margin-right: auto; }
+  }
+  @media (max-width: 680px) {
+    .tv-header-actions .tv-control-button:first-of-type { display: none; }
+    .tv-eyebrow { display: none; }
+    .tv-title { font-size: 18px; max-width: 260px; }
+    .tv-stage-wrap { padding: 12px; }
+    .tv-scene-inner { padding: 22px 18px; }
+    .tv-scene-top { display: block; }
+    .tv-published { display: none; }
+    .tv-scene-title { font-size: 30px; }
+    .tv-podium { display: block; overflow: auto; }
+    .tv-podium-card, .tv-podium-card.featured { width: auto; min-height: 180px; margin: 8px 0; }
+    .tv-progress-layout { display: block; overflow: auto; }
+    .tv-progress-big, .tv-progress-copy { width: 100%; padding-left: 0; }
+    .tv-progress-circle { width: 180px; height: 180px; margin-top: 20px; }
+    .tv-metrics, .tv-two-cards { display: block; margin: 14px 0 0; }
+    .tv-metric, .tv-small-card { width: auto; margin: 8px 0; }
+    .tv-waiting h2 { font-size: 38px; }
+    .tv-footer { padding-left: 16px; padding-right: 16px; }
+    .tv-refresh-button { display: none; }
+  }
+`;
 
 function ResultScene({
   slide,
@@ -1236,48 +1301,32 @@ function ResultScene({
   const third = winners.find((entry) => entry.result.position === 3) || winners[2] || null;
 
   return (
-    <div className="relative flex h-full min-h-[620px] flex-col overflow-hidden px-6 py-6 sm:px-9 sm:py-8 lg:px-14 lg:py-10 xl:px-16">
-      <div
-        className="pointer-events-none absolute -right-20 -top-28 h-[430px] w-[430px] rounded-full blur-[95px]"
-        style={{ background: `${theme.primary}33` }}
-      />
-      <div className="pointer-events-none absolute right-[4%] top-[8%] text-[220px] font-black leading-none text-white/[0.018] lg:text-[320px]">
-        {String(group.programme.sort_order || 1).padStart(2, "0")}
-      </div>
-
-      <div className="relative z-10 flex flex-wrap items-start justify-between gap-5">
+    <div className="tv-scene-inner">
+      <div className="tv-scene-top">
         <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.065] px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
-              <Radio size={14} className={latest ? "text-[var(--live-bright)]" : "text-white/45"} />
-              {latest ? "Latest Result" : "Result Highlight"}
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/[0.045] px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/45">
-              {getCategoryName(group.programme.category_id)}{normalizeGender(group.programme.gender_scope) === "All" ? "" : ` • ${normalizeGender(group.programme.gender_scope)}`}
-            </span>
-          </div>
-
-          <h2 className="mt-5 max-w-[1250px] text-4xl font-black uppercase leading-[.94] tracking-[-0.07em] sm:text-5xl lg:text-6xl xl:text-[76px]">
-            {group.programme.name}
-          </h2>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-white/42 sm:text-sm">
-            <span>{formatProgrammeType(group.programme.programme_type)}</span>
-            <span className="h-1 w-1 rounded-full bg-white/25" />
-            <span>{formatStageType(group.programme.stage_type)}</span>
+          <span className="tv-scene-kicker" style={{ color: latest ? theme.bright : "#d7e0eb" }}>
+            {latest ? "Latest Result" : "Result Highlight"}
+          </span>
+          <h2 className="tv-scene-title">{group.programme.name}</h2>
+          <div className="tv-scene-meta">
+            {getCategoryName(group.programme.category_id)}
+            {normalizeGender(group.programme.gender_scope) === "All"
+              ? ""
+              : ` • ${normalizeGender(group.programme.gender_scope)}`}
+            {` • ${formatProgrammeType(group.programme.programme_type)} • ${formatStageType(group.programme.stage_type)}`}
           </div>
         </div>
 
-        <div className="hidden rounded-[1.4rem] border border-white/10 bg-white/[0.055] px-5 py-4 text-right lg:block">
-          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/35">Published</p>
-          <p className="mt-1 text-xl font-black tabular-nums">{formatPublishedTime(group.publishedAt)}</p>
+        <div className="tv-published">
+          <small>Published</small>
+          <strong>{formatPublishedTime(group.publishedAt)}</strong>
         </div>
       </div>
 
-      <div className="relative z-10 mt-7 grid flex-1 items-end gap-4 md:grid-cols-3 lg:gap-5 xl:gap-7">
-        <PodiumCard entry={second} team={second ? getTeam(second.teamId) : null} position={2} delay=".12s" />
-        <PodiumCard entry={first} team={first ? getTeam(first.teamId) : null} position={1} featured delay="0s" />
-        <PodiumCard entry={third} team={third ? getTeam(third.teamId) : null} position={3} delay=".22s" />
+      <div className="tv-podium">
+        <PodiumCard entry={second} team={second ? getTeam(second.teamId) : null} position={2} theme={theme} />
+        <PodiumCard entry={first} team={first ? getTeam(first.teamId) : null} position={1} theme={theme} featured />
+        <PodiumCard entry={third} team={third ? getTeam(third.teamId) : null} position={3} theme={theme} />
       </div>
     </div>
   );
@@ -1288,21 +1337,18 @@ function PodiumCard({
   team,
   position,
   featured = false,
-  delay,
+  theme,
 }: {
   entry: ResultEntry | null;
   team: Team | null;
   position: number;
   featured?: boolean;
-  delay: string;
+  theme: ReturnType<typeof getThemeStyle>;
 }) {
   if (!entry) {
     return (
-      <div
-        className={`live-winner-rise flex min-h-[230px] items-center justify-center rounded-[2rem] border border-white/[0.08] bg-white/[0.035] ${featured ? "md:min-h-[315px]" : "md:min-h-[270px]"}`}
-        style={{ animationDelay: delay }}
-      >
-        <Medal className="text-white/15" size={38} />
+      <div className={`tv-podium-card empty ${featured ? "featured" : ""}`}>
+        <Medal size={38} />
       </div>
     );
   }
@@ -1313,57 +1359,35 @@ function PodiumCard({
 
   return (
     <div
-      className={`live-winner-rise group relative overflow-hidden rounded-[2.1rem] border p-5 backdrop-blur-xl sm:p-6 lg:p-7 ${
-        featured
-          ? "border-[var(--live-bright)]/30 bg-white/[0.105] md:min-h-[315px] md:-translate-y-5 shadow-[0_24px_70px_var(--live-glow)]"
-          : "border-white/10 bg-white/[0.055] md:min-h-[270px]"
-      }`}
-      style={{ animationDelay: delay }}
+      className={`tv-podium-card ${featured ? "featured" : ""}`}
+      style={featured ? { borderColor: theme.bright } : undefined}
     >
-      {featured && (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute -left-1/3 top-0 h-full w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent" style={{ animation: "liveShine 4.4s ease-in-out infinite 1.2s" }} />
-        </div>
-      )}
+      <div className="tv-medal-row">
+        <span className="tv-medal">{getMedal(position)}</span>
+        <span className="tv-position-pill">{getPositionText(position)}</span>
+      </div>
 
-      <div className="relative z-10 flex h-full flex-col">
-        <div className="flex items-start justify-between gap-3">
-          <div className={`flex items-center justify-center rounded-[1.35rem] border border-white/10 bg-white/[0.07] ${featured ? "h-16 w-16 text-4xl" : "h-14 w-14 text-3xl"}`}>
-            {getMedal(position)}
-          </div>
-          <span className="rounded-full border border-white/10 bg-white/[0.045] px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-white/45">
-            {getPositionText(position)}
-          </span>
-        </div>
+      <div className="tv-podium-copy">
+        {chest && <p className="tv-chest" style={{ color: theme.bright }}>Chest #{chest}</p>}
+        <h3 className="tv-winner-name">{name}</h3>
 
-        <div className="mt-auto pt-6">
-          {chest && (
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--live-bright)]">Chest #{chest}</p>
-          )}
-          <h3 className={`mt-1.5 line-clamp-2 font-black uppercase leading-[.98] tracking-[-0.055em] ${featured ? "text-3xl lg:text-4xl xl:text-[42px]" : "text-2xl lg:text-3xl"}`}>
-            {name}
-          </h3>
+        {entry.programme.programme_type === "group" && entry.memberNames.length > 0 && (
+          <p className="tv-member-list">
+            {entry.memberNames.slice(0, 5).join(" • ")}
+            {entry.memberNames.length > 5 ? ` +${entry.memberNames.length - 5} more` : ""}
+          </p>
+        )}
 
-          {entry.programme.programme_type === "group" && entry.memberNames.length > 0 && (
-            <p className="mt-3 line-clamp-2 text-xs font-bold leading-5 text-white/38">
-              {entry.memberNames.slice(0, 5).join(" • ")}
-              {entry.memberNames.length > 5 ? ` +${entry.memberNames.length - 5} more` : ""}
-            </p>
-          )}
-
-          <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-4">
-            <div className="flex min-w-0 items-center gap-2.5">
-              {team?.logo_url ? (
-                <img src={team.logo_url} alt="" className="h-8 w-8 shrink-0 rounded-lg object-contain bg-white/90 p-1" />
-              ) : (
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: team?.color || "var(--live-primary)" }} />
-              )}
-              <p className="truncate text-xs font-black uppercase tracking-[0.08em] text-white/72 sm:text-sm">{teamName}</p>
-            </div>
-            {entry.result.grade && (
-              <span className="shrink-0 text-[9px] font-black uppercase tracking-[0.14em] text-white/35">Grade {entry.result.grade}</span>
+        <div className="tv-team-line">
+          <div className="tv-team-name">
+            {team?.logo_url ? (
+              <img src={team.logo_url} alt="" />
+            ) : (
+              <span className="tv-team-color" style={{ backgroundColor: team?.color || theme.primary }} />
             )}
+            <span>{teamName}</span>
           </div>
+          {entry.result.grade && <span className="tv-grade">Grade {entry.result.grade}</span>}
         </div>
       </div>
     </div>
@@ -1378,61 +1402,47 @@ function StandingsScene({
   theme: ReturnType<typeof getThemeStyle>;
 }) {
   const top = leaderboard.slice(0, 6);
+  const leaderPoints = Math.max(1, top[0]?.points || 1);
 
   return (
-    <div className="relative flex h-full min-h-[620px] flex-col overflow-hidden px-6 py-7 sm:px-9 sm:py-9 lg:px-14 lg:py-11 xl:px-16">
-      <Trophy className="pointer-events-none absolute -right-10 -top-20 h-[420px] w-[420px] text-white/[0.018]" />
-      <div className="relative z-10">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/65">
-          <Trophy size={14} className="text-[var(--live-bright)]" /> Championship
-        </span>
-        <h2 className="mt-4 text-4xl font-black uppercase tracking-[-0.065em] sm:text-5xl lg:text-6xl xl:text-[72px]">
-          Team Standings
-        </h2>
-        <p className="mt-2 text-sm font-bold text-white/40 sm:text-base">Live points from published results.</p>
-      </div>
+    <div className="tv-scene-inner">
+      <span className="tv-scene-kicker" style={{ color: theme.bright }}>Championship</span>
+      <h2 className="tv-scene-title">Team Standings</h2>
+      <div className="tv-scene-meta">Live points from published results.</div>
 
       {top.length === 0 ? (
-        <div className="relative z-10 flex flex-1 items-center justify-center text-center">
-          <div>
-            <Trophy className="mx-auto text-white/15" size={56} />
-            <p className="mt-5 text-2xl font-black">No team points yet</p>
-          </div>
+        <div className="tv-waiting">
+          <div className="tv-waiting-inner"><Trophy size={56} /><h2>No team points yet</h2></div>
         </div>
       ) : (
-        <div className="relative z-10 mt-8 grid flex-1 content-center auto-rows-max gap-4 lg:grid-cols-2 lg:gap-5">
+        <div className="tv-standings-list">
           {top.map((team, index) => {
-            const leaderPoints = Math.max(1, top[0]?.points || 1);
             const width = Math.max(5, Math.round((team.points / leaderPoints) * 100));
             return (
               <div
                 key={team.teamId}
-                className={`live-winner-rise relative overflow-hidden rounded-[2rem] border p-5 sm:p-6 ${index === 0 ? "border-[var(--live-bright)]/30 bg-white/[0.10]" : "border-white/10 bg-white/[0.05]"}`}
-                style={{ animationDelay: `${index * 0.08}s` }}
+                className="tv-standing-row"
+                style={index === 0 ? { borderColor: theme.bright } : undefined}
               >
-                <div className="flex items-center gap-4">
-                  <div className={`flex shrink-0 items-center justify-center rounded-[1.35rem] border border-white/10 bg-white/[0.07] ${index === 0 ? "h-16 w-16 text-3xl" : "h-14 w-14 text-2xl"}`}>
-                    {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
+                <div className="tv-standing-rank">
+                  {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}
+                </div>
+                <div className="tv-standing-main">
+                  <div className="tv-standing-title">
+                    {team.teamLogo ? (
+                      <img src={team.teamLogo} alt="" />
+                    ) : (
+                      <span className="tv-team-color" style={{ backgroundColor: team.teamColor || theme.primary }} />
+                    )}
+                    <h3>{team.teamName}</h3>
                   </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-3">
-                      {team.teamLogo ? (
-                        <img src={team.teamLogo} alt="" className="h-9 w-9 shrink-0 rounded-xl bg-white/90 object-contain p-1" />
-                      ) : (
-                        <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: team.teamColor || theme.primary }} />
-                      )}
-                      <h3 className="truncate text-xl font-black uppercase tracking-[-0.035em] sm:text-2xl lg:text-3xl">{team.teamName}</h3>
-                    </div>
-                    <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
-                      <div className="h-full rounded-full" style={{ width: `${width}%`, background: `linear-gradient(90deg, ${theme.primary}, ${theme.bright})` }} />
-                    </div>
+                  <div className="tv-standing-bar">
+                    <span style={{ width: `${width}%`, backgroundColor: theme.primary }} />
                   </div>
-
-                  <div className="shrink-0 text-right">
-                    <p className="text-3xl font-black tabular-nums tracking-[-0.055em] sm:text-4xl">{team.points}</p>
-                    <p className="text-[9px] font-black uppercase tracking-[0.17em] text-white/35">points</p>
-                  </div>
+                </div>
+                <div className="tv-standing-points">
+                  <strong>{team.points}</strong>
+                  <small>points</small>
                 </div>
               </div>
             );
@@ -1463,51 +1473,37 @@ function ProgressScene({
   theme: ReturnType<typeof getThemeStyle>;
 }) {
   return (
-    <div className="relative grid h-full min-h-[620px] overflow-hidden px-6 py-7 sm:px-9 sm:py-9 lg:grid-cols-[.88fr_1.12fr] lg:gap-12 lg:px-14 lg:py-11 xl:px-16">
-      <div className="flex items-center justify-center">
-        <div
-          className="live-ring-glow relative flex h-[300px] w-[300px] items-center justify-center rounded-full p-[18px] sm:h-[360px] sm:w-[360px] lg:h-[420px] lg:w-[420px]"
-          style={{
-            background: `conic-gradient(${theme.bright} 0 ${progressPercent}%, rgba(255,255,255,.075) ${progressPercent}% 100%)`,
-          }}
-        >
-          <div className="flex h-full w-full flex-col items-center justify-center rounded-full border border-white/10 bg-[#08101c]/90 shadow-inner backdrop-blur-xl">
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/35 sm:text-xs">Event Progress</p>
-            <p className="mt-2 text-7xl font-black tabular-nums tracking-[-0.09em] sm:text-8xl lg:text-[108px]">{progressPercent}%</p>
-            <p className="mt-2 text-xs font-black uppercase tracking-[0.14em] text-white/35 sm:text-sm">Results Published</p>
+    <div className="tv-scene-inner">
+      <div className="tv-progress-layout">
+        <div className="tv-progress-big">
+          <div className="tv-progress-circle" style={{ borderColor: theme.primary }}>
+            <strong>{progressPercent}%</strong>
+            <span>Results Published</span>
           </div>
         </div>
-      </div>
 
-      <div className="flex flex-col justify-center py-3">
-        <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/65">
-          <Sparkles size={14} className="text-[var(--live-bright)]" /> Event Pulse
-        </span>
-        <h2 className="mt-5 text-4xl font-black uppercase leading-[.95] tracking-[-0.065em] sm:text-5xl lg:text-6xl xl:text-[72px]">The Fest Is Moving</h2>
-        <p className="mt-3 max-w-2xl text-sm font-bold leading-6 text-white/40 sm:text-base">Automatic progress based on programmes with published results.</p>
+        <div className="tv-progress-copy">
+          <span className="tv-scene-kicker" style={{ color: theme.bright }}>Event Pulse</span>
+          <h2>The Fest Is Moving</h2>
+          <p>Automatic progress based on programmes with published results.</p>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-3 lg:gap-4">
-          <MetricBox label="Published" value={String(publishedProgrammeCount)} note="programmes" />
-          <MetricBox label="Remaining" value={String(remainingProgrammes)} note="programmes" />
-          <MetricBox label="Total" value={String(totalProgrammes)} note="programmes" />
-        </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:gap-4">
-          <div className="rounded-[1.6rem] border border-white/10 bg-white/[0.045] p-5">
-            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Latest Result</p>
-            <p className="mt-2 truncate text-lg font-black uppercase tracking-[-0.025em] sm:text-xl">{latestGroup?.programme.name || "Waiting"}</p>
-            {latestGroup && (
-              <p className="mt-1 text-xs font-bold text-white/35">{getCategoryName(latestGroup.programme.category_id)}</p>
-            )}
+          <div className="tv-metrics">
+            <MetricBox label="Published" value={String(publishedProgrammeCount)} note="programmes" />
+            <MetricBox label="Remaining" value={String(remainingProgrammes)} note="programmes" />
+            <MetricBox label="Total" value={String(totalProgrammes)} note="programmes" />
           </div>
 
-          <div className="rounded-[1.6rem] border border-white/10 bg-white/[0.045] p-5">
-            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">Leading Team</p>
-            <div className="mt-2 flex items-center justify-between gap-3">
-              <p className="truncate text-lg font-black uppercase tracking-[-0.025em] sm:text-xl">{leader?.teamName || "-"}</p>
-              {leader && <span className="text-xl font-black tabular-nums text-[var(--live-bright)]">{leader.points}</span>}
+          <div className="tv-two-cards">
+            <div className="tv-small-card">
+              <small>Latest Result</small>
+              <strong>{latestGroup?.programme.name || "Waiting"}</strong>
+              <span>{latestGroup ? getCategoryName(latestGroup.programme.category_id) : "No result yet"}</span>
             </div>
-            <p className="mt-1 text-xs font-bold text-white/35">Current championship points</p>
+            <div className="tv-small-card">
+              <small>Leading Team</small>
+              <strong>{leader?.teamName || "-"}</strong>
+              <span>{leader ? `${leader.points} current championship points` : "No team points yet"}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1523,18 +1519,13 @@ function WaitingScene({
   theme: ReturnType<typeof getThemeStyle>;
 }) {
   return (
-    <div className="relative flex h-full min-h-[620px] items-center justify-center overflow-hidden p-8 text-center">
-      <div className="absolute h-[440px] w-[440px] rounded-full blur-[110px]" style={{ background: `${theme.primary}33` }} />
-      <div className="relative z-10 max-w-3xl">
-        <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[2rem] border border-white/12 bg-white/[0.06] shadow-2xl">
-          <Radio className="text-[var(--live-bright)]" size={38} />
-        </div>
-        <p className="mt-7 text-[10px] font-black uppercase tracking-[0.24em] text-[var(--live-bright)]">Live Results Display</p>
-        <h2 className="mt-3 text-4xl font-black uppercase leading-[.96] tracking-[-0.065em] sm:text-5xl lg:text-7xl">{eventTitle}</h2>
-        <p className="mx-auto mt-5 max-w-xl text-sm font-bold leading-6 text-white/42 sm:text-base">The screen will update automatically when the first result is published.</p>
-        <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-5 py-3 text-xs font-black uppercase tracking-[0.15em] text-white/55">
-          <span className="live-pulse-dot h-2 w-2 rounded-full bg-emerald-300" /> Waiting for published results
-        </div>
+    <div className="tv-waiting">
+      <div className="tv-waiting-inner">
+        <div className="tv-waiting-icon"><Radio size={38} color={theme.bright} /></div>
+        <div className="tv-waiting-kicker" style={{ color: theme.bright }}>Live Results Display</div>
+        <h2>{eventTitle}</h2>
+        <p>The screen will update automatically when the first result is published.</p>
+        <div className="tv-waiting-status"><i /> Waiting for published results</div>
       </div>
     </div>
   );
@@ -1542,10 +1533,10 @@ function WaitingScene({
 
 function MetricBox({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="rounded-[1.55rem] border border-white/10 bg-white/[0.045] p-5">
-      <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{label}</p>
-      <p className="mt-1 text-3xl font-black tabular-nums tracking-[-0.055em] sm:text-4xl">{value}</p>
-      <p className="mt-1 text-[10px] font-bold text-white/30">{note}</p>
+    <div className="tv-metric">
+      <small>{label}</small>
+      <strong>{value}</strong>
+      <span>{note}</span>
     </div>
   );
 }
@@ -1560,12 +1551,7 @@ function ControlButton({
   title: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] text-white/72 transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white sm:h-12 sm:w-12"
-    >
+    <button type="button" onClick={onClick} title={title} className="tv-control-button">
       {children}
     </button>
   );
@@ -1573,13 +1559,12 @@ function ControlButton({
 
 function LoadingScreen() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#050816] px-5 text-white">
-      <div className="text-center">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.06] shadow-2xl">
-          <RefreshCcw className="animate-spin" size={32} />
-        </div>
-        <h1 className="mt-6 text-3xl font-black tracking-[-0.05em]">Opening Live TV</h1>
-        <p className="mt-2 text-sm font-bold text-slate-400">Connecting to published results…</p>
+    <main className="tv-root tv-center-screen" style={{ backgroundColor: "#050816" }}>
+      <style jsx global>{TV_SAFE_CSS}</style>
+      <div className="tv-error-card">
+        <RefreshCcw size={34} />
+        <h1>Opening Live TV</h1>
+        <p>Connecting to published results...</p>
       </div>
     </main>
   );
