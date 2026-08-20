@@ -65,6 +65,8 @@ type Participant = {
   programme_id: string | null;
   student_id: string | null;
   team_id: string | null;
+  group_name?: string | null;
+  registration_no?: string | null;
   status: string | null;
 };
 
@@ -99,6 +101,7 @@ type ScorerRow = {
   totalPoints: number;
   stagePoints: number;
   offStagePoints: number;
+  groupPoints: number;
   highestMark: number;
   resultCount: number;
   rank: number;
@@ -122,6 +125,9 @@ export default function TopScorersPage() {
   const [genderFilter, setGenderFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [teamFilter, setTeamFilter] = useState("all");
+  const [includeGroupProgrammes, setIncludeGroupProgrammes] = useState(false);
+  const [selectedGroupProgrammeId, setSelectedGroupProgrammeId] =
+    useState("all");
 
   useEffect(() => {
     loadTopScorers();
@@ -276,6 +282,19 @@ supabase
     return new Map(teams.map((item) => [item.id, item.name]));
   }, [teams]);
 
+  const groupProgrammes = useMemo(() => {
+    return programmes
+      .filter(
+        (programme) =>
+          String(programme.programme_type || "")
+            .trim()
+            .toLowerCase() === "group",
+      )
+      .sort((first, second) =>
+        String(first.name || "").localeCompare(String(second.name || "")),
+      );
+  }, [programmes]);
+
   const scorerRows = useMemo<ScorerRow[]>(() => {
     const studentMap = new Map(students.map((item) => [item.id, item]));
     const programmeMap = new Map(programmes.map((item) => [item.id, item]));
@@ -283,50 +302,46 @@ supabase
 
     const scorerMap = new Map<string, ScorerRow>();
 
-    for (const result of results) {
-      const programme = programmeMap.get(result.programme_id);
-      if (!programme) continue;
+    const getOrCreateScorer = (student: Student) => {
+      const current = scorerMap.get(student.id);
 
-      const programmeType = String(programme.programme_type || "")
-  .trim()
-  .toLowerCase();
+      if (current) {
+        return current;
+      }
 
-      // For individual top scorer, group programmes are not counted.
-      if (programmeType !== "individual") continue;
+      const created: ScorerRow = {
+        student,
+        teamName: teamMap.get(student.team_id || "") || "-",
+        categoryName: categoryMap.get(student.category_id || "") || "-",
+        totalPoints: 0,
+        stagePoints: 0,
+        offStagePoints: 0,
+        groupPoints: 0,
+        highestMark: 0,
+        resultCount: 0,
+        rank: 0,
+      };
 
-      const participant = result.registration_id
-        ? participantMap.get(result.registration_id)
-        : null;
+      scorerMap.set(student.id, created);
+      return created;
+    };
 
-      if (!participant?.student_id) continue;
+    const addPointsToStudent = ({
+      student,
+      points,
+      isOffStage,
+      mark,
+      isGroupShare,
+    }: {
+      student: Student;
+      points: number;
+      isOffStage: boolean;
+      mark: number;
+      isGroupShare: boolean;
+    }) => {
+      if (points <= 0) return;
 
-      const student = studentMap.get(participant.student_id);
-      if (!student) continue;
-
-      const points = Number(result.points || 0);
-      if (points <= 0) continue;
-
-      const stageType = String(programme.stage_type || "stage")
-  .trim()
-  .toLowerCase();
-      const isOffStage =
-        stageType === "off_stage" ||
-        stageType === "off-stage" ||
-        stageType === "offstage";
-
-      const existing =
-        scorerMap.get(student.id) ||
-        ({
-          student,
-          teamName: teamMap.get(student.team_id || "") || "-",
-          categoryName: categoryMap.get(student.category_id || "") || "-",
-          totalPoints: 0,
-          stagePoints: 0,
-          offStagePoints: 0,
-          highestMark: 0,
-          resultCount: 0,
-          rank: 0,
-        } satisfies ScorerRow);
+      const existing = getOrCreateScorer(student);
 
       existing.totalPoints += points;
 
@@ -336,18 +351,164 @@ supabase
         existing.stagePoints += points;
       }
 
-      existing.highestMark = Math.max(
-        existing.highestMark,
-        Number(result.total_mark || result.average_mark || 0),
-      );
+      if (isGroupShare) {
+        existing.groupPoints += points;
+      }
+
+      existing.highestMark = Math.max(existing.highestMark, mark);
       existing.resultCount += 1;
 
       scorerMap.set(student.id, existing);
+    };
+
+    for (const result of results) {
+      const programme = programmeMap.get(result.programme_id);
+      if (!programme) continue;
+
+      const programmeType = String(programme.programme_type || "")
+        .trim()
+        .toLowerCase();
+
+      const stageType = String(programme.stage_type || "stage")
+        .trim()
+        .toLowerCase();
+
+      const isOffStage =
+        stageType === "off_stage" ||
+        stageType === "off-stage" ||
+        stageType === "offstage";
+
+      const resultPoints = Number(result.points || 0);
+      if (resultPoints <= 0) continue;
+
+      const resultMark = Number(
+        result.total_mark || result.average_mark || 0,
+      );
+
+      const resultRegistration = result.registration_id
+        ? participantMap.get(result.registration_id)
+        : null;
+
+      if (programmeType === "individual") {
+        if (!resultRegistration?.student_id) continue;
+
+        const student = studentMap.get(resultRegistration.student_id);
+        if (!student) continue;
+
+        addPointsToStudent({
+          student,
+          points: resultPoints,
+          isOffStage,
+          mark: resultMark,
+          isGroupShare: false,
+        });
+
+        continue;
+      }
+
+      if (programmeType !== "group" || !includeGroupProgrammes) {
+        continue;
+      }
+
+      if (
+        selectedGroupProgrammeId !== "all" &&
+        programme.id !== selectedGroupProgrammeId
+      ) {
+        continue;
+      }
+
+      if (!resultRegistration) continue;
+
+      const normalizedGroupName = String(
+        resultRegistration.group_name || "",
+      ).trim();
+
+      const groupRegistrations = participants.filter((registration) => {
+        if (registration.programme_id !== programme.id) return false;
+
+        const registrationStatus = String(registration.status || "")
+          .trim()
+          .toLowerCase();
+
+        if (
+          registrationStatus === "cancelled" ||
+          registrationStatus === "canceled" ||
+          registrationStatus === "rejected" ||
+          registrationStatus === "withdrawn"
+        ) {
+          return false;
+        }
+
+        if (normalizedGroupName) {
+          return (
+            registration.team_id === resultRegistration.team_id &&
+            String(registration.group_name || "").trim() ===
+              normalizedGroupName
+          );
+        }
+
+        // Fallback for older group registrations that do not have group_name:
+        // use the winning team within this programme.
+        return registration.team_id === resultRegistration.team_id;
+      });
+
+      const uniqueGroupStudents = Array.from(
+        new Map(
+          groupRegistrations
+            .map((registration) => {
+              if (!registration.student_id) return null;
+              const student = studentMap.get(registration.student_id);
+              return student ? [student.id, student] as const : null;
+            })
+            .filter(Boolean) as Array<readonly [string, Student]>,
+        ).values(),
+      );
+
+      // If the result registration itself is a student registration but the
+      // group lookup did not find other rows, keep that student instead of
+      // silently dropping the result.
+      if (
+        uniqueGroupStudents.length === 0 &&
+        resultRegistration.student_id
+      ) {
+        const fallbackStudent = studentMap.get(
+          resultRegistration.student_id,
+        );
+
+        if (fallbackStudent) {
+          uniqueGroupStudents.push(fallbackStudent);
+        }
+      }
+
+      if (uniqueGroupStudents.length === 0) continue;
+
+      // Group points are divided equally among the actual registered members
+      // of that winning group and rounded to the nearest whole point.
+      // Example: 10 points / 3 students = 3.333 -> 3 points each.
+      const sharedPoints = Math.round(
+        resultPoints / uniqueGroupStudents.length,
+      );
+
+      for (const student of uniqueGroupStudents) {
+        addPointsToStudent({
+          student,
+          points: sharedPoints,
+          isOffStage,
+          mark: resultMark,
+          isGroupShare: true,
+        });
+      }
     }
 
     const sorted = Array.from(scorerMap.values()).sort((a, b) => {
-      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-      if (b.stagePoints !== a.stagePoints) return b.stagePoints - a.stagePoints;
+      if (b.totalPoints !== a.totalPoints) {
+        return b.totalPoints - a.totalPoints;
+      }
+
+      if (b.stagePoints !== a.stagePoints) {
+        return b.stagePoints - a.stagePoints;
+      }
+
       if (b.offStagePoints !== a.offStagePoints) {
         return b.offStagePoints - a.offStagePoints;
       }
@@ -358,7 +519,7 @@ supabase
     let lastPoints: number | null = null;
     let currentRank = 0;
 
-    return sorted.map((row, index) => {
+    return sorted.map((row) => {
       if (lastPoints === null || row.totalPoints !== lastPoints) {
         currentRank += 1;
         lastPoints = row.totalPoints;
@@ -369,7 +530,16 @@ supabase
         rank: currentRank,
       };
     });
-  }, [students, programmes, participants, results, categoryMap, teamMap]);
+  }, [
+    students,
+    programmes,
+    participants,
+    results,
+    categoryMap,
+    teamMap,
+    includeGroupProgrammes,
+    selectedGroupProgrammeId,
+  ]);
 
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -461,6 +631,80 @@ supabase
         </div>
       ) : (
         <div className="space-y-6">
+          <div className="rounded-[2rem] border border-violet-200 bg-violet-50/50 p-5 shadow-xl shadow-violet-900/5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-700">
+                  Group Programme Points
+                </p>
+                <h2 className="mt-1 text-xl font-black tracking-[-0.04em] text-slate-950">
+                  Optional group contribution
+                </h2>
+                <p className="mt-1 max-w-3xl text-sm font-bold leading-6 text-slate-500">
+                  Individual programmes are always counted. Turn this on when selected
+                  group programme points should also be shared between the registered
+                  members of each winning group.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setIncludeGroupProgrammes((current) => !current)
+                }
+                className={`inline-flex h-12 shrink-0 items-center justify-center rounded-2xl px-5 text-sm font-black transition ${
+                  includeGroupProgrammes
+                    ? "bg-violet-600 text-white shadow-lg shadow-violet-900/20 hover:bg-violet-700"
+                    : "border border-violet-200 bg-white text-violet-700 hover:bg-violet-100"
+                }`}
+              >
+                {includeGroupProgrammes
+                  ? "Group Programmes: ON"
+                  : "Include Group Programmes"}
+              </button>
+            </div>
+
+            {includeGroupProgrammes && (
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+                <div>
+                  <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                    Group Programme
+                  </label>
+                  <select
+                    value={selectedGroupProgrammeId}
+                    onChange={(event) =>
+                      setSelectedGroupProgrammeId(event.target.value)
+                    }
+                    className="h-13 w-full rounded-2xl border border-violet-200 bg-white px-4 text-sm font-black text-slate-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                  >
+                    <option value="all">All Group Programmes</option>
+                    {groupProgrammes.map((programme) => (
+                      <option key={programme.id} value={programme.id}>
+                        {programme.name}
+                        {" — "}
+                        {categoryMap.get(programme.category_id || "") || "General"}
+                        {programme.gender_scope
+                          ? ` — ${programme.gender_scope}`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="rounded-2xl border border-violet-200 bg-white px-4 py-3">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-violet-700">
+                    Point division rule
+                  </p>
+                  <p className="mt-1 text-sm font-bold leading-6 text-slate-600">
+                    Each winning group's points are divided by its registered member
+                    count and rounded to the nearest whole point. Example: 10 points ÷
+                    3 members = 3.333, so each member receives 3 points in Top Scorers.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-xl shadow-slate-900/5">
             <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
               <div className="relative">
@@ -547,7 +791,7 @@ supabase
               icon={<Users size={19} />}
               title="Total Contenders"
               value={String(scorerRows.length)}
-              subtitle="Scoring individual contestants"
+              subtitle={includeGroupProgrammes ? "Individual + selected group shares" : "Scoring individual contestants"}
             />
 
             <SummaryCard
@@ -565,7 +809,15 @@ supabase
                   Contenders Ranking
                 </h2>
                 <p className="mt-1 text-sm font-bold text-slate-500">
-                  Overall ranking from published individual programme results.
+                  {includeGroupProgrammes
+                    ? selectedGroupProgrammeId === "all"
+                      ? "Overall ranking from individual results plus shared points from all group programmes."
+                      : `Overall ranking from individual results plus shared points from ${
+                          groupProgrammes.find(
+                            (item) => item.id === selectedGroupProgrammeId,
+                          )?.name || "the selected group programme"
+                        }.`
+                    : "Overall ranking from published individual programme results."}
                 </p>
               </div>
 
@@ -584,8 +836,11 @@ supabase
                   No top scorer data found
                 </p>
                 <p className="mt-2 text-sm font-bold text-slate-500">
-                  Publish individual programme results first, then refresh this
-                  page.
+                  Publish individual programme results first
+                  {includeGroupProgrammes
+                    ? " or publish the selected group programme result"
+                    : ""}
+                  , then refresh this page.
                 </p>
               </div>
             ) : (
@@ -601,6 +856,7 @@ supabase
                       <Th>Category</Th>
                       <Th>Stage</Th>
                       <Th>Off-stage</Th>
+                      {includeGroupProgrammes && <Th>Group Share</Th>}
                       <Th>Total</Th>
                     </tr>
                   </thead>
@@ -656,6 +912,14 @@ supabase
                             {row.offStagePoints} pts
                           </span>
                         </Td>
+
+                        {includeGroupProgrammes && (
+                          <Td>
+                            <span className="font-black text-emerald-700">
+                              {row.groupPoints} pts
+                            </span>
+                          </Td>
+                        )}
 
                         <Td>
                           <span className="text-base font-black text-slate-950">

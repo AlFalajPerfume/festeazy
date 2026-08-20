@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Award,
   CheckCircle2,
+  Filter,
   Loader2,
   RefreshCcw,
   Save,
@@ -41,6 +42,7 @@ type Programme = {
   stage_type: string;
   sort_order: number;
   category_id: string | null;
+  gender_scope: string;
   total_marks: number;
 };
 
@@ -150,6 +152,52 @@ function compareCodeLetters(
     );
 }
 
+function normalizeProgrammeGender(value: string | null | undefined) {
+  const normalized = String(value || "all")
+    .trim()
+    .toLowerCase();
+
+  if (normalized.includes("female") || normalized.includes("girl")) {
+    return "female";
+  }
+
+  if (normalized.includes("male") || normalized.includes("boy")) {
+    return "male";
+  }
+
+  return "all";
+}
+
+function normalizeProgrammeLocation(value: string | null | undefined) {
+  const normalized = String(value || "stage")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (
+    normalized === "off_stage" ||
+    normalized === "off-stage" ||
+    normalized === "offstage"
+  ) {
+    return "off_stage";
+  }
+
+  if (normalized === "stage") return "stage";
+
+  return normalized || "stage";
+}
+
+function formatProgrammeLocation(value: string | null | undefined) {
+  const normalized = normalizeProgrammeLocation(value);
+
+  if (normalized === "off_stage") return "Off-stage";
+  if (normalized === "stage") return "Stage";
+
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export default function MarkEntryPage() {
   const [programmes, setProgrammes] = useState<Programme[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -183,6 +231,15 @@ export default function MarkEntryPage() {
   const [participantSearch, setParticipantSearch] =
     useState("");
 
+  const [programmeCategoryFilter, setProgrammeCategoryFilter] =
+    useState("all");
+  const [programmeGenderFilter, setProgrammeGenderFilter] =
+    useState("all");
+  const [programmeTypeFilter, setProgrammeTypeFilter] =
+    useState("all");
+  const [programmeLocationFilter, setProgrammeLocationFilter] =
+    useState("all");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -200,13 +257,100 @@ export default function MarkEntryPage() {
     );
   }, [programmes, programmeId]);
 
+  const filteredProgrammes = useMemo(() => {
+    return programmes
+      .filter((item) => {
+        const matchesCategory =
+          programmeCategoryFilter === "all" ||
+          (programmeCategoryFilter === "general"
+            ? !item.category_id
+            : item.category_id === programmeCategoryFilter);
+
+        const normalizedGender = normalizeProgrammeGender(
+          item.gender_scope,
+        );
+        const matchesGender =
+          programmeGenderFilter === "all" ||
+          normalizedGender === "all" ||
+          normalizedGender === programmeGenderFilter;
+
+        const matchesType =
+          programmeTypeFilter === "all" ||
+          String(item.programme_type || "individual")
+            .trim()
+            .toLowerCase() === programmeTypeFilter;
+
+        const matchesLocation =
+          programmeLocationFilter === "all" ||
+          normalizeProgrammeLocation(item.stage_type) ===
+            programmeLocationFilter;
+
+        return (
+          matchesCategory &&
+          matchesGender &&
+          matchesType &&
+          matchesLocation
+        );
+      })
+      .sort((first, second) => {
+        if (first.sort_order !== second.sort_order) {
+          return first.sort_order - second.sort_order;
+        }
+
+        return first.name.localeCompare(second.name);
+      });
+  }, [
+    programmes,
+    programmeCategoryFilter,
+    programmeGenderFilter,
+    programmeTypeFilter,
+    programmeLocationFilter,
+  ]);
+
   const programmeOptions = useMemo(() => {
-    return programmes.map((item) => ({
+    return filteredProgrammes.map((item) => ({
       id: item.id,
       name: item.name,
       sort_order: item.sort_order,
     }));
+  }, [filteredProgrammes]);
+
+  const programmeLocationOptions = useMemo(() => {
+    const values = new Map<string, string>();
+
+    programmes.forEach((item) => {
+      const value = normalizeProgrammeLocation(item.stage_type);
+      if (!values.has(value)) {
+        values.set(value, formatProgrammeLocation(item.stage_type));
+      }
+    });
+
+    return Array.from(values, ([value, label]) => ({
+      value,
+      label,
+    })).sort((first, second) =>
+      first.label.localeCompare(second.label),
+    );
   }, [programmes]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const selectedStillMatches = filteredProgrammes.some(
+      (item) => item.id === programmeId,
+    );
+
+    if (!selectedStillMatches) {
+      setProgrammeId(filteredProgrammes[0]?.id || "");
+      setParticipantSearch("");
+      setError("");
+      setMessage("");
+    }
+  }, [
+    filteredProgrammes,
+    programmeId,
+    loading,
+  ]);
 
   const activeJudges = useMemo(() => {
     if (!programmeId) return [];
@@ -298,13 +442,10 @@ export default function MarkEntryPage() {
             judge.id,
           );
 
-          const rawValue = values[key];
+          const rawValue = String(values[key] ?? "").trim();
 
-          if (
-            rawValue === undefined ||
-            rawValue.trim() === ""
-          ) {
-            return null;
+          if (rawValue === "") {
+            return 0;
           }
 
           const mark = Number(rawValue);
@@ -418,7 +559,7 @@ export default function MarkEntryPage() {
       supabase
         .from("programmes")
         .select(
-          "id, name, programme_type, stage_type, sort_order, category_id, total_marks",
+          "id, name, programme_type, stage_type, sort_order, category_id, gender_scope, total_marks",
         )
         .eq("organization_id", organizationId)
         .eq("event_id", eventId)
@@ -805,19 +946,8 @@ export default function MarkEntryPage() {
           judge.id,
         );
 
-        const rawValue = values[key];
-
-        if (
-          rawValue === undefined ||
-          rawValue.trim() === ""
-        ) {
-          setError(
-            `Enter marks for all participants and all ${activeJudges.length} judges.`,
-          );
-          return;
-        }
-
-        const mark = Number(rawValue);
+        const rawValue = String(values[key] ?? "").trim();
+        const mark = rawValue === "" ? 0 : Number(rawValue);
 
         if (
           !Number.isFinite(mark) ||
@@ -825,7 +955,7 @@ export default function MarkEntryPage() {
           mark > programme.total_marks
         ) {
           setError(
-            `Every judge mark must be between 0 and ${programme.total_marks}.`,
+            `Every judge mark must be between 0 and ${programme.total_marks}. Leave any unscored participant blank; blank fields are saved as 0.`,
           );
           return;
         }
@@ -994,6 +1124,85 @@ export default function MarkEntryPage() {
         )}
 
         <section className="rounded-[1.8rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-900/[0.04]">
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                  <Filter size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-slate-950">
+                    Programme Filters
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">
+                    Filter programmes before selecting the mark sheet.
+                  </p>
+                </div>
+              </div>
+
+              <span className="w-fit rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-700 shadow-sm ring-1 ring-slate-200">
+                {filteredProgrammes.length} matching
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <select
+                value={programmeCategoryFilter}
+                onChange={(event) =>
+                  setProgrammeCategoryFilter(event.target.value)
+                }
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+              >
+                <option value="all">All Categories</option>
+                <option value="general">General</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={programmeGenderFilter}
+                onChange={(event) =>
+                  setProgrammeGenderFilter(event.target.value)
+                }
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+              >
+                <option value="all">All Genders</option>
+                <option value="male">Boys</option>
+                <option value="female">Girls</option>
+              </select>
+
+              <select
+                value={programmeTypeFilter}
+                onChange={(event) =>
+                  setProgrammeTypeFilter(event.target.value)
+                }
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+              >
+                <option value="all">All Types</option>
+                <option value="individual">Individual</option>
+                <option value="group">Group</option>
+              </select>
+
+              <select
+                value={programmeLocationFilter}
+                onChange={(event) =>
+                  setProgrammeLocationFilter(event.target.value)
+                }
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-800 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+              >
+                <option value="all">All Locations</option>
+                {programmeLocationOptions.map((location) => (
+                  <option key={location.value} value={location.value}>
+                    {location.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
             <div>
               <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
@@ -1004,8 +1213,8 @@ export default function MarkEntryPage() {
                 value={programmeId}
                 onChange={handleProgrammeChange}
                 options={programmeOptions}
-                placeholder="Search programme..."
-                emptyText="No programmes found"
+                placeholder="Search filtered programmes..."
+                emptyText="No programmes match the selected filters"
               />
             </div>
 
@@ -1156,6 +1365,12 @@ export default function MarkEntryPage() {
                 : "Submit Marks"}
             </button>
           </div>
+
+          {programme && activeJudges.length > 0 && presentEntries.length > 0 && (
+            <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs font-black text-amber-800">
+              Enter marks only for the participants who scored. Every blank mark for every other present participant/judge is automatically saved as 0 and calculated as 0 in the preview.
+            </div>
+          )}
 
           {loading ? (
             <div className="flex min-h-[360px] items-center justify-center gap-3 text-sm font-black text-slate-500">
