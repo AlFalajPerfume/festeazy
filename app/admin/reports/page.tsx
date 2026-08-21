@@ -1497,11 +1497,62 @@ export default function ReportsPage() {
         programmeCount: programmeIdsByStudent.get(student.id)?.size || 0,
       }))
       .sort((a, b) => {
-        const chestCompare =
-          chestNumber(a.chestNo) - chestNumber(b.chestNo);
-        if (chestCompare !== 0) return chestCompare;
-        return a.studentName.localeCompare(b.studentName);
-      });
+  // 1. Category order
+  const categoryA = categories.findIndex(
+    (category) => category.name === a.categoryName
+  );
+  const categoryB = categories.findIndex(
+    (category) => category.name === b.categoryName
+  );
+
+  if (categoryA !== categoryB) {
+    return categoryA - categoryB;
+  }
+
+  // 2. Class order
+  const classA = classes.find(
+    (item) => item.id === a.student.class_id
+  );
+  const classB = classes.find(
+    (item) => item.id === b.student.class_id
+  );
+
+  const classOrderA = classA?.sort_order ?? 9999;
+  const classOrderB = classB?.sort_order ?? 9999;
+
+  if (classOrderA !== classOrderB) {
+    return classOrderA - classOrderB;
+  }
+
+  // 3. Division order
+  const divisionA = divisions.find(
+    (item) => item.id === a.student.division_id
+  );
+  const divisionB = divisions.find(
+    (item) => item.id === b.student.division_id
+  );
+
+  const divisionOrderA = divisionA?.sort_order ?? 9999;
+  const divisionOrderB = divisionB?.sort_order ?? 9999;
+
+  if (divisionOrderA !== divisionOrderB) {
+    return divisionOrderA - divisionOrderB;
+  }
+
+  // 4. Student name alphabetically A-Z
+  const nameCompare = a.studentName.localeCompare(
+    b.studentName,
+    undefined,
+    { sensitivity: "base" }
+  );
+
+  if (nameCompare !== 0) {
+    return nameCompare;
+  }
+
+  // 5. Chest number only as final tie-breaker
+  return chestNumber(a.chestNo) - chestNumber(b.chestNo);
+});
   }, [
     registrations,
     results,
