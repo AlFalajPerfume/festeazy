@@ -6608,7 +6608,12 @@ function ProgrammeWiseSheets({
                 dateText={dateText}
                 programmeName={first.programmeName}
                 categoryName={first.categoryName}
-                typeText={first.type}
+                typeLabel={type === "green_room" ? "Gender" : "Type"}
+                typeText={
+                  type === "green_room"
+                    ? formatGenderScope(first.gender)
+                    : first.type
+                }
                 stageText={
                   first.stageType === "off_stage" ? "Off Stage" : "Stage"
                 }
@@ -6661,6 +6666,7 @@ function SingleProgrammeHeader({
   dateText,
   programmeName,
   categoryName,
+  typeLabel = "Type",
   typeText,
   stageText,
   marks,
@@ -6674,6 +6680,7 @@ function SingleProgrammeHeader({
   dateText: string;
   programmeName: string;
   categoryName: string;
+  typeLabel?: string;
   typeText: string;
   stageText: string;
   marks: number;
@@ -6725,8 +6732,8 @@ function SingleProgrammeHeader({
           </h2>
 
           <p className="mt-1 text-xs font-black uppercase text-violet-700">
-            Category: {categoryName} · Type: {typeText} · Stage: {stageText} ·
-            Marks: {marks}
+          Category: {categoryName} · {typeLabel}: {typeText} · Stage: {stageText} ·
+          Marks: {marks}
           </p>
         </div>
 
