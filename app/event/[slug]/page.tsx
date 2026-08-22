@@ -143,6 +143,7 @@ type ResultItem = {
   event_id: string;
   programme_id: string | null;
   registration_id: string | null;
+  result_number?: number | null;
   total_mark: number;
   average_mark: number;
   grade: string | null;
@@ -1323,6 +1324,15 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
     return {
       ...liveData,
       ...(lock?.poster_data || {}),
+      // Winner fields must always reflect the current published result rows.
+      // This keeps old poster locks from hiding tie winners or showing
+      // participants who are now unplaced/disqualified.
+      first_name: liveData.first_name,
+      first_unit: liveData.first_unit,
+      second_name: liveData.second_name,
+      second_unit: liveData.second_unit,
+      third_name: liveData.third_name,
+      third_unit: liveData.third_unit,
       organization_name: liveData.organization_name,
       event_title: liveData.event_title,
       event_date: liveData.event_date,
@@ -1332,8 +1342,14 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
   }
 
   function getProgrammeResultNumber(group: ProgrammeResultGroup) {
-    const lockedNumber = getPosterLock(group.programme.id)?.result_no;
-    if (lockedNumber) return lockedNumber;
+    const storedNumber = group.entries
+      .map((entry) => Number(entry.result.result_number || 0))
+      .find((value) => Number.isFinite(value) && value > 0);
+
+    if (storedNumber) return storedNumber;
+
+    const lockedNumber = Number(getPosterLock(group.programme.id)?.result_no || 0);
+    if (Number.isFinite(lockedNumber) && lockedNumber > 0) return lockedNumber;
 
     const index = programmeGroups.findIndex(
       (item) => item.programme.id === group.programme.id,
@@ -2493,12 +2509,19 @@ ${publicUrl}`;
                       entry={entry}
                       teamName={getTeamName(entry.teamId)}
                       position={
-                        entry.result.grade === "Absent"
+                        String(entry.result.grade || "").trim().toLowerCase() ===
+                        "absent"
                           ? "Absent"
-                          : getPositionShort(entry.result.position)
+                          : String(entry.result.grade || "")
+                                .trim()
+                                .toLowerCase() === "disqualified"
+                            ? "Disqualified"
+                            : getPositionShort(entry.result.position)
                       }
                       medal={
-                        entry.result.grade === "Absent"
+                        ["absent", "disqualified"].includes(
+                          String(entry.result.grade || "").trim().toLowerCase(),
+                        )
                           ? "✕"
                           : getPositionMedal(entry.result.position)
                       }
@@ -3137,8 +3160,9 @@ function PosterPreviewModal({
 
               <div className="mt-4 space-y-3">
                 {group.entries
-                  .filter((entry) => entry.result.grade !== "Absent")
-                  .slice(0, 3)
+                  .filter((entry) =>
+                    [1, 2, 3].includes(Number(entry.result.position || 0)),
+                  )
                   .map((entry) => (
                     <div
                       key={entry.result.id}
@@ -3461,9 +3485,9 @@ function ResultCard({
   onViewPoster: () => void;
   onShare: () => void;
 }) {
-  const topThree = group.entries
-    .filter((entry) => entry.result.grade !== "Absent")
-    .slice(0, 3);
+  const topThree = group.entries.filter((entry) =>
+    [1, 2, 3].includes(Number(entry.result.position || 0)),
+  );
   const firstPublishedAt = group.entries[0]?.result.published_at || null;
 
   return (
