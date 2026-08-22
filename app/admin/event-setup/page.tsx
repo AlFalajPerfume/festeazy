@@ -1552,7 +1552,7 @@ export default function EventSetupPage() {
               <section>
                 <SectionTitle
                   title="Result Point Rules"
-                  description="Set the team points awarded for Individual and Group programme positions. Tied participants receive the same position points, and the next position is skipped."
+                  description="Set the team points awarded for Individual and Group programme positions. Equal marks receive the same position, and the next distinct score receives the next position."
                 />
 
                 <div className="mt-4 grid gap-5 lg:grid-cols-2">
@@ -1602,7 +1602,7 @@ export default function EventSetupPage() {
                 </div>
 
                 <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800">
-                  Tie example: two participants tied for 1st are ranked 1st and 1st. Both receive 1st-place points, and the following participant is ranked 3rd.
+                  Dense ranking example: 70 = 1st, 60 = 2nd, 60 = 2nd, 55 = 3rd, 55 = 3rd. Tied participants receive the same position points.
                 </div>
               </section>
 

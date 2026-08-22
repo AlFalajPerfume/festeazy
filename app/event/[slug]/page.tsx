@@ -1343,12 +1343,36 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
   }
 
   function buildPosterData(group: ProgrammeResultGroup): PosterData {
-    const topThree = group.entries
-      .filter((entry) => entry.result.grade !== "Absent")
-      .slice(0, 3);
-    const first = topThree[0];
-    const second = topThree[1];
-    const third = topThree[2];
+    const rankedEntries = group.entries.filter((entry) =>
+      [1, 2, 3].includes(Number(entry.result.position || 0)),
+    );
+
+    function getPlacementText(position: number) {
+      const tiedEntries = rankedEntries.filter(
+        (entry) => Number(entry.result.position) === position,
+      );
+
+      if (tiedEntries.length === 0) {
+        return { names: "-", units: "-" };
+      }
+
+      return {
+        names: tiedEntries
+          .map((entry) => cleanPosterName(entry.participantTitle))
+          .join("\n"),
+        units: Array.from(
+          new Set(
+            tiedEntries.map((entry) =>
+              getTeamName(entry.teamId || null).toUpperCase(),
+            ),
+          ),
+        ).join(" / "),
+      };
+    }
+
+    const first = getPlacementText(1);
+    const second = getPlacementText(2);
+    const third = getPlacementText(3);
     const resultNo = getProgrammeResultNumber(group);
 
     return {
@@ -1356,12 +1380,12 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
       result_no: String(resultNo).padStart(2, "0"),
       category: getCategoryName(group.programme.category_id).toUpperCase(),
       programme: group.programme.name,
-      first_name: cleanPosterName(first?.participantTitle),
-      first_unit: getTeamName(first?.teamId || null).toUpperCase(),
-      second_name: cleanPosterName(second?.participantTitle),
-      second_unit: getTeamName(second?.teamId || null).toUpperCase(),
-      third_name: cleanPosterName(third?.participantTitle),
-      third_unit: getTeamName(third?.teamId || null).toUpperCase(),
+      first_name: first.names,
+      first_unit: first.units,
+      second_name: second.names,
+      second_unit: second.units,
+      third_name: third.names,
+      third_unit: third.units,
       organization_name: organization?.name || "",
       event_title: eventInfo?.title || "",
       event_date: formatDateRange(),
@@ -1371,9 +1395,9 @@ const slug = String(Array.isArray(slugParam) ? slugParam[0] : slugParam || "")
   }
 
   function getShareText(group: ProgrammeResultGroup) {
-    const topThree = group.entries
-      .filter((entry) => entry.result.grade !== "Absent")
-      .slice(0, 3);
+    const topThree = group.entries.filter((entry) =>
+      [1, 2, 3].includes(Number(entry.result.position || 0)),
+    );
 
     const winners = topThree
       .map((entry) => {
@@ -1452,6 +1476,15 @@ ${publicUrl}`;
     }
   }
 
+  function getManualTextLines(value: string) {
+    const lines = String(value || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    return lines.length > 0 ? lines : [""];
+  }
+
   function getAutoFitFontSize(
     key: LayerKey,
     value: string,
@@ -1472,19 +1505,30 @@ ${publicUrl}`;
 
     if (!measureContext) return baseSize;
 
-    const minSize = Math.max(11, Math.round(baseSize * 0.58));
+    const textLines = getManualTextLines(value);
+    const minSize = Math.max(11, Math.round(baseSize * 0.5));
     const letterSpacing = Number.parseFloat(layer.letterSpacing) || 0;
     const fontWeight = String(layer.fontWeight || 700);
     const fontFamily = layer.fontFamily || "Arial, sans-serif";
+    const multilineCap =
+      textLines.length <= 1
+        ? baseSize
+        : textLines.length === 2
+          ? Math.round(baseSize * 0.84)
+          : textLines.length === 3
+            ? Math.round(baseSize * 0.65)
+            : Math.round(baseSize * 0.54);
+    const startSize = Math.max(minSize, Math.min(baseSize, multilineCap));
 
-    for (let size = baseSize; size >= minSize; size -= 1) {
+    for (let size = startSize; size >= minSize; size -= 1) {
       measureContext.font = `${fontWeight} ${size}px ${fontFamily}`;
-      if (
-        getTextWidth(measureContext, value, letterSpacing) <=
-        Number(layer.width || 500)
-      ) {
-        return size;
-      }
+      const allLinesFit = textLines.every(
+        (line) =>
+          getTextWidth(measureContext!, line, letterSpacing) <=
+          Number(layer.width || 500),
+      );
+
+      if (allLinesFit) return size;
     }
 
     return minSize;
@@ -1570,11 +1614,44 @@ ${publicUrl}`;
     });
   }
 
+  function getDynamicPosterLayerY(
+    key: LayerKey,
+    data: PosterData,
+    template: PosterTemplate,
+  ) {
+    const nameKeyByUnit: Partial<Record<LayerKey, LayerKey>> = {
+      first_unit: "first_name",
+      second_unit: "second_name",
+      third_unit: "third_name",
+    };
+    const nameKey = nameKeyByUnit[key];
+    const layer = normalizeLayer(key, template);
+
+    if (!nameKey) return layer.y;
+
+    const nameValue = data[nameKey];
+    const nameLines = getManualTextLines(nameValue);
+    if (nameLines.length <= 1) return layer.y;
+
+    const nameLayer = normalizeLayer(nameKey, template);
+    const fittedNameSize = getAutoFitFontSize(
+      nameKey,
+      nameValue,
+      nameLayer,
+    );
+    const lineHeight =
+      fittedNameSize * Math.max(0.7, Number(nameLayer.lineHeight || 1));
+    const nameBottom = nameLayer.y + nameLines.length * lineHeight + 6;
+
+    return Math.max(layer.y, nameBottom);
+  }
+
   function drawPosterTextLayer(
     context: CanvasRenderingContext2D,
     key: LayerKey,
     value: string,
     template: PosterTemplate,
+    data: PosterData,
   ) {
     if (!value || value === "-") return;
 
@@ -1594,7 +1671,7 @@ ${publicUrl}`;
     context.textBaseline = "top";
 
     const lines = AUTO_FIT_LAYER_KEYS.includes(key)
-      ? [value]
+      ? getManualTextLines(value)
       : wrapCanvasText(context, value, layer.width, letterSpacing);
 
     lines.forEach((line, lineIndex) => {
@@ -1607,7 +1684,8 @@ ${publicUrl}`;
         drawX = layer.x + layer.width - measuredWidth;
       }
 
-      const drawY = layer.y + lineIndex * lineHeight;
+      const drawY =
+        getDynamicPosterLayerY(key, data, template) + lineIndex * lineHeight;
 
       if (letterSpacing === 0) {
         context.fillText(line, drawX, drawY);
@@ -1653,6 +1731,7 @@ ${publicUrl}`;
         key,
         selectedPosterData[key],
         selectedPosterTemplate,
+        selectedPosterData,
       );
     });
 
@@ -2637,6 +2716,15 @@ function normalizeLayer(
   };
 }
 
+function getPosterTextLines(value: string) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines : [""];
+}
+
 function getLayerAutoFitFontSize(
   key: LayerKey,
   value: string,
@@ -2653,21 +2741,68 @@ function getLayerAutoFitFontSize(
   const context = canvas.getContext("2d");
   if (!context) return baseSize;
 
-  const minSize = Math.max(11, Math.round(baseSize * 0.58));
+  const textLines = getPosterTextLines(value);
+  const minSize = Math.max(11, Math.round(baseSize * 0.5));
   const letterSpacing = Number.parseFloat(layer.letterSpacing) || 0;
   const fontWeight = String(layer.fontWeight || 700);
   const fontFamily = layer.fontFamily || "Arial, sans-serif";
+  const multilineCap =
+    textLines.length <= 1
+      ? baseSize
+      : textLines.length === 2
+        ? Math.round(baseSize * 0.84)
+        : textLines.length === 3
+          ? Math.round(baseSize * 0.65)
+          : Math.round(baseSize * 0.54);
+  const startSize = Math.max(minSize, Math.min(baseSize, multilineCap));
 
-  for (let size = baseSize; size >= minSize; size -= 1) {
+  for (let size = startSize; size >= minSize; size -= 1) {
     context.font = `${fontWeight} ${size}px ${fontFamily}`;
-    const measured =
-      context.measureText(value).width +
-      Math.max(0, value.length - 1) * letterSpacing;
+    const allLinesFit = textLines.every((line) => {
+      const measured =
+        context.measureText(line).width +
+        Math.max(0, line.length - 1) * letterSpacing;
+      return measured <= Number(layer.width || 500);
+    });
 
-    if (measured <= Number(layer.width || 500)) return size;
+    if (allLinesFit) return size;
   }
 
   return minSize;
+}
+
+function getPosterCanvasLayerY(
+  key: LayerKey,
+  data: PosterData,
+  template: PosterTemplate,
+) {
+  const nameKeyByUnit: Partial<Record<LayerKey, LayerKey>> = {
+    first_unit: "first_name",
+    second_unit: "second_name",
+    third_unit: "third_name",
+  };
+  const nameKey = nameKeyByUnit[key];
+  const layer = normalizeLayer(key, template);
+
+  if (!nameKey) return layer.y;
+
+  const nameValue = data[nameKey];
+  const nameLines = getPosterTextLines(nameValue);
+  if (nameLines.length <= 1) return layer.y;
+
+  const nameLayer = normalizeLayer(nameKey, template);
+  const fittedNameSize = getLayerAutoFitFontSize(
+    nameKey,
+    nameValue,
+    nameLayer,
+  );
+  const lineHeight =
+    fittedNameSize * Math.max(0.7, Number(nameLayer.lineHeight || 1));
+
+  return Math.max(
+    layer.y,
+    nameLayer.y + nameLines.length * lineHeight + 6,
+  );
 }
 
 function PosterCanvas({
@@ -2723,7 +2858,7 @@ function PosterCanvas({
               className="absolute select-none whitespace-pre-wrap"
               style={{
                 left: layer.x,
-                top: layer.y,
+                top: getPosterCanvasLayerY(key, data, template),
                 width: layer.width,
                 color: layer.color,
                 fontSize: fittedFontSize,

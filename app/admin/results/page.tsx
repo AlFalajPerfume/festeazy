@@ -540,24 +540,49 @@ export default function ResultsPage() {
         return Number(b.result.total_mark || 0) - Number(a.result.total_mark || 0);
       });
 
-    const first =
-      entries.find((entry) => entry.result.position === 1) || null;
-    const second =
-      entries.find((entry) => entry.result.position === 2) || null;
-    const third =
-      entries.find((entry) => entry.result.position === 3) || null;
+    function getPlacementPosterText(position: number) {
+      const tiedEntries = entries.filter(
+        (entry) => Number(entry.result.position) === position,
+      );
+
+      if (tiedEntries.length === 0) {
+        return {
+          names: "-",
+          units: "-",
+        };
+      }
+
+      return {
+        names: tiedEntries
+          .map((entry) =>
+            cleanPosterName(entry.participantTitle).toUpperCase(),
+          )
+          .join("\n"),
+        units: Array.from(
+          new Set(
+            tiedEntries.map((entry) =>
+              getTeamName(entry.teamId || null).toUpperCase(),
+            ),
+          ),
+        ).join(" / "),
+      };
+    }
+
+    const first = getPlacementPosterText(1);
+    const second = getPlacementPosterText(2);
+    const third = getPlacementPosterText(3);
 
     return {
       result_label: "RESULT",
       result_no: String(resultNo || 1).padStart(2, "0"),
       category: getCategoryName(programme.category_id).toUpperCase(),
       programme: programme.name,
-      first_name: cleanPosterName(first?.participantTitle).toUpperCase(),
-      first_unit: getTeamName(first?.teamId || null).toUpperCase(),
-      second_name: cleanPosterName(second?.participantTitle).toUpperCase(),
-      second_unit: getTeamName(second?.teamId || null).toUpperCase(),
-      third_name: cleanPosterName(third?.participantTitle).toUpperCase(),
-      third_unit: getTeamName(third?.teamId || null).toUpperCase(),
+      first_name: first.names,
+      first_unit: first.units,
+      second_name: second.names,
+      second_unit: second.units,
+      third_name: third.names,
+      third_unit: third.units,
     };
   }
 
@@ -624,7 +649,7 @@ export default function ResultsPage() {
 
     const { data: existingRows, error: existingError } = await supabase
       .from("result_posters")
-      .select("programme_id")
+      .select("id, programme_id, result_no")
       .eq("organization_id", orgUser.organization_id)
       .eq("event_id", eventInfo.id)
       .in("programme_id", targetProgrammeIds);
@@ -634,8 +659,10 @@ export default function ResultsPage() {
       return { createdCount: 0 };
     }
 
-    const existingProgrammeIds = new Set(
-      (existingRows || []).map((item: any) => item.programme_id).filter(Boolean),
+    const existingPosterByProgramme = new Map(
+      (existingRows || [])
+        .filter((item: any) => item.programme_id)
+        .map((item: any) => [item.programme_id, item]),
     );
 
     const { data: activeTemplate, error: templateError } = await supabase
@@ -653,34 +680,79 @@ export default function ResultsPage() {
       console.warn("Active result poster template check failed:", templateError.message);
     }
 
-    const rows = targetProgrammeIds
-      .filter((programmeId) => !existingProgrammeIds.has(programmeId))
-      .map((programmeId) => {
-        const resultNo = orderedPublishedProgrammeIds.findIndex((id) => id === programmeId) + 1;
+    const rowsToInsert: Array<Record<string, unknown>> = [];
+    const rowsToRefresh: Array<{
+      id: string;
+      resultNo: number;
+      programmeId: string;
+    }> = [];
 
-        return {
-          organization_id: orgUser.organization_id,
-          event_id: eventInfo.id,
-          programme_id: programmeId,
-          template_id: activeTemplate?.id || null,
-          result_no: resultNo || 1,
-          poster_data: buildLockedPosterData(programmeId, resultNo || 1),
-          is_public: true,
-        };
+    targetProgrammeIds.forEach((programmeId) => {
+      const calculatedResultNo =
+        orderedPublishedProgrammeIds.findIndex((id) => id === programmeId) + 1;
+      const existingPoster = existingPosterByProgramme.get(programmeId) as
+        | { id: string; result_no: number | null }
+        | undefined;
+
+      if (existingPoster?.id) {
+        rowsToRefresh.push({
+          id: existingPoster.id,
+          resultNo: Number(existingPoster.result_no || calculatedResultNo || 1),
+          programmeId,
+        });
+        return;
+      }
+
+      const resultNo = calculatedResultNo || 1;
+
+      rowsToInsert.push({
+        organization_id: orgUser.organization_id,
+        event_id: eventInfo.id,
+        programme_id: programmeId,
+        template_id: activeTemplate?.id || null,
+        result_no: resultNo,
+        poster_data: buildLockedPosterData(programmeId, resultNo),
+        is_public: true,
       });
+    });
 
-    if (rows.length === 0) {
-      return { createdCount: 0 };
+    if (rowsToRefresh.length > 0) {
+      const refreshResults = await Promise.all(
+        rowsToRefresh.map((item) =>
+          supabase
+            .from("result_posters")
+            .update({
+              poster_data: buildLockedPosterData(
+                item.programmeId,
+                item.resultNo,
+              ),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", item.id)
+            .eq("organization_id", orgUser.organization_id)
+            .eq("event_id", eventInfo.id),
+        ),
+      );
+
+      const refreshError = refreshResults.find((result) => result.error)?.error;
+
+      if (refreshError) {
+        console.warn("Result poster refresh failed:", refreshError.message);
+      }
     }
 
-    const { error: insertError } = await supabase.from("result_posters").insert(rows);
+    if (rowsToInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from("result_posters")
+        .insert(rowsToInsert);
 
-    if (insertError) {
-      console.warn("Result poster lock save failed:", insertError.message);
-      return { createdCount: 0 };
+      if (insertError) {
+        console.warn("Result poster lock save failed:", insertError.message);
+        return { createdCount: 0 };
+      }
     }
 
-    return { createdCount: rows.length };
+    return { createdCount: rowsToInsert.length };
   }
 
   async function ensureMilestonePosters() {

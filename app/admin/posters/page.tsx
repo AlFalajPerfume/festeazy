@@ -577,6 +577,15 @@ function getTextWidthWithSpacing(
   );
 }
 
+function getManualTextLines(value: string) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines : [""];
+}
+
 function getAutoFitFontSize(
   key: LayerKey,
   value: string,
@@ -597,19 +606,30 @@ function getAutoFitFontSize(
 
   if (!measureContext) return baseSize;
 
-  const minSize = Math.max(11, Math.round(baseSize * 0.58));
+  const textLines = getManualTextLines(value);
+  const minSize = Math.max(11, Math.round(baseSize * 0.5));
   const letterSpacing = Number.parseFloat(field.letterSpacing || "0") || 0;
   const family = field.fontFamily || "Arial, sans-serif";
   const weight = Number(field.fontWeight || 700);
+  const multilineCap =
+    textLines.length <= 1
+      ? baseSize
+      : textLines.length === 2
+        ? Math.round(baseSize * 0.84)
+        : textLines.length === 3
+          ? Math.round(baseSize * 0.65)
+          : Math.round(baseSize * 0.54);
+  const startSize = Math.max(minSize, Math.min(baseSize, multilineCap));
 
-  for (let size = baseSize; size >= minSize; size -= 1) {
+  for (let size = startSize; size >= minSize; size -= 1) {
     measureContext.font = `${weight} ${size}px ${family}`;
-    if (
-      getTextWidthWithSpacing(measureContext, value, letterSpacing) <=
-      Number(field.width || 500)
-    ) {
-      return size;
-    }
+    const allLinesFit = textLines.every(
+      (line) =>
+        getTextWidthWithSpacing(measureContext!, line, letterSpacing) <=
+        Number(field.width || 500),
+    );
+
+    if (allLinesFit) return size;
   }
 
   return minSize;
@@ -1038,7 +1058,12 @@ export default function PosterStudioPage() {
 
   function buildLivePosterData(programme: Programme): PosterData {
     const programmeResults = results
-      .filter((item) => item.programme_id === programme.id && item.is_published)
+      .filter(
+        (item) =>
+          item.programme_id === programme.id &&
+          item.is_published &&
+          [1, 2, 3].includes(Number(item.position || 0)),
+      )
       .sort((a, b) => {
         const positionCompare =
           Number(a.position || 999) - Number(b.position || 999);
@@ -1046,9 +1071,28 @@ export default function PosterStudioPage() {
         return Number(b.total_mark || 0) - Number(a.total_mark || 0);
       });
 
-    const first = programmeResults[0];
-    const second = programmeResults[1];
-    const third = programmeResults[2];
+    function getPlacementText(position: number) {
+      const tiedResults = programmeResults.filter(
+        (item) => Number(item.position) === position,
+      );
+
+      if (tiedResults.length === 0) {
+        return { names: "-", units: "-" };
+      }
+
+      return {
+        names: tiedResults.map((item) => getWinnerName(item)).join("\n"),
+        units: Array.from(
+          new Set(
+            tiedResults.map((item) => getWinnerUnit(item).toUpperCase()),
+          ),
+        ).join(" / "),
+      };
+    }
+
+    const first = getPlacementText(1);
+    const second = getPlacementText(2);
+    const third = getPlacementText(3);
     const posterLock = posterLocks.find(
       (item) => item.programme_id === programme.id,
     );
@@ -1061,12 +1105,12 @@ export default function PosterStudioPage() {
       result_no: String(resultIndex || 1).padStart(2, "0"),
       category: getCategoryName(programme.category_id).toUpperCase(),
       programme: programme.name,
-      first_name: first ? getWinnerName(first) : "-",
-      first_unit: first ? getWinnerUnit(first).toUpperCase() : "-",
-      second_name: second ? getWinnerName(second) : "-",
-      second_unit: second ? getWinnerUnit(second).toUpperCase() : "-",
-      third_name: third ? getWinnerName(third) : "-",
-      third_unit: third ? getWinnerUnit(third).toUpperCase() : "-",
+      first_name: first.names,
+      first_unit: first.units,
+      second_name: second.names,
+      second_unit: second.units,
+      third_name: third.names,
+      third_unit: third.units,
       organization_name: organization?.name || "",
       event_title: eventInfo?.title || "",
       event_date: formatEventDateRange(),
@@ -1689,13 +1733,44 @@ export default function PosterStudioPage() {
       }
 
       FIELD_ORDER.forEach((key) => {
-        drawTextField(ctx, key, posterData[key], layout[key]);
+        drawTextField(ctx, key, posterData[key], {
+          ...layout[key],
+          y: getDynamicLayerTop(key, posterData, layout),
+        });
       });
     } catch {
       setError(
         "Template image could not load. Check template file path or Supabase bucket public access.",
       );
     }
+  }
+
+  function getDynamicLayerTop(
+    key: LayerKey,
+    data: PosterData,
+    layout: PosterLayout,
+  ) {
+    const nameKeyByUnit: Partial<Record<LayerKey, LayerKey>> = {
+      first_unit: "first_name",
+      second_unit: "second_name",
+      third_unit: "third_name",
+    };
+    const nameKey = nameKeyByUnit[key];
+
+    if (!nameKey) return Number(layout[key].y || 0);
+
+    const nameValue = data[nameKey];
+    const nameLines = getManualTextLines(nameValue);
+    if (nameLines.length <= 1) return Number(layout[key].y || 0);
+
+    const nameField = layout[nameKey];
+    const fittedNameSize = getAutoFitFontSize(nameKey, nameValue, nameField);
+    const nameLineHeight =
+      fittedNameSize * Math.max(0.7, Number(nameField.lineHeight || 1));
+    const nameBottom =
+      Number(nameField.y || 0) + nameLines.length * nameLineHeight + 6;
+
+    return Math.max(Number(layout[key].y || 0), nameBottom);
   }
 
   function drawTextField(
@@ -1717,7 +1792,7 @@ export default function PosterStudioPage() {
     ctx.textBaseline = "top";
 
     const lines = AUTO_FIT_LAYER_KEYS.includes(key)
-      ? [text]
+      ? getManualTextLines(text)
       : wrapCanvasText(ctx, text || "", Number(field.width || 500), letterSpacing);
     const lineHeight = fontSize * Number(field.lineHeight || 1.1);
 
@@ -1790,14 +1865,16 @@ export default function PosterStudioPage() {
   }
 
   function copyWhatsAppText() {
+    const shareValue = (value: string) =>
+      String(value || "-").replace(/\s*\n\s*/g, " / ");
     const text = `🏆 ${eventInfo?.title || "Meelad Fest"} Result
 
 📌 Programme: ${posterData.programme}
 🏷️ Category: ${posterData.category}
 
-🥇 ${posterData.first_name} - ${posterData.first_unit}
-🥈 ${posterData.second_name} - ${posterData.second_unit}
-🥉 ${posterData.third_name} - ${posterData.third_unit}
+🥇 ${shareValue(posterData.first_name)} - ${posterData.first_unit}
+🥈 ${shareValue(posterData.second_name)} - ${posterData.second_unit}
+🥉 ${shareValue(posterData.third_name)} - ${posterData.third_unit}
 
 Generated by FestEazy`;
 
@@ -2011,7 +2088,12 @@ Generated by FestEazy`;
                             }`}
                             style={{
                               left: field.x * scale,
-                              top: field.y * scale,
+                              top:
+                                getDynamicLayerTop(
+                                  key,
+                                  posterData,
+                                  activeLayout,
+                                ) * scale,
                               width: field.width * scale,
                               color: field.color,
                               fontSize: fittedFontSize * scale,
@@ -2020,6 +2102,7 @@ Generated by FestEazy`;
                               lineHeight: field.lineHeight,
                               letterSpacing: field.letterSpacing,
                               textAlign: field.align,
+                              whiteSpace: "pre-wrap",
                               touchAction: "none",
                             }}
                             title={FIELD_LABELS[key]}

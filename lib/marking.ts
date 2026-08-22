@@ -62,20 +62,18 @@ export function competitionRanks<T>(
   const sorted = [...rows].sort((a, b) => getMark(b) - getMark(a));
 
   let previousMark: number | null = null;
-  let previousPosition = 0;
+  let densePosition = 0;
 
-  return sorted.map((row, index) => {
+  return sorted.map((row) => {
     const mark = Number(getMark(row).toFixed(2));
-    let position = index + 1;
 
-    if (previousMark !== null && mark === previousMark) {
-      position = previousPosition;
+    if (previousMark === null || mark !== previousMark) {
+      densePosition += 1;
     }
 
     previousMark = mark;
-    previousPosition = position;
 
-    return { row, position };
+    return { row, position: densePosition };
   });
 }
 
