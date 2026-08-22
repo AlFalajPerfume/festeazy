@@ -166,6 +166,7 @@ type ReportType =
   | "programme_register"
   | "winners_list"
   | "prize_distribution"
+  | "result_announcement"
   | "team_wise"
   | "top_scorers"
   | "encouragement_gift"
@@ -346,6 +347,23 @@ type EncouragementGiftRow = {
   programmeCount: number;
 };
 
+type ResultAnnouncementRow = {
+  resultId: string;
+  programmeId: string;
+  programmeName: string;
+  categoryName: string;
+  programmeType: string;
+  stageType: string;
+  gender: string;
+  totalMarks: number;
+  position: number;
+  codeLetter: string;
+  chestNo: string;
+  participantName: string;
+  teamName: string;
+  points: number;
+};
+
 const REPORT_TYPES: {
   id: ReportType;
   title: string;
@@ -416,8 +434,14 @@ const REPORT_TYPES: {
   {
     id: "prize_distribution",
     title: "Prize Distribution",
-    description: "Prize handover list for stage",
+    description: "Prize handover list for published 1st, 2nd and 3rd positions",
     icon: "🎁",
+  },
+  {
+    id: "result_announcement",
+    title: "Result Announcement Sheet",
+    description: "Pre-publish announcer copy with place, code, chest, participant, team and points",
+    icon: "📣",
   },
   {
     id: "team_wise",
@@ -485,6 +509,7 @@ const REPORT_GROUPS: ReportGroup[] = [
     reportIds: [
       "winners_list",
       "prize_distribution",
+      "result_announcement",
       "encouragement_gift",
       "top_scorers",
       "result_summary",
@@ -1036,7 +1061,9 @@ export default function ReportsPage() {
       reportType === "programme_register" ||
       reportType === "green_room" ||
       reportType === "call_list" ||
-      reportType === "valuation_sheet";
+      reportType === "valuation_sheet" ||
+      reportType === "prize_distribution" ||
+      reportType === "result_announcement";
 
     return programmes
       .filter((programme) => {
@@ -1128,7 +1155,9 @@ export default function ReportsPage() {
           reportType === "programme_register" ||
           reportType === "green_room" ||
           reportType === "call_list" ||
-          reportType === "valuation_sheet";
+          reportType === "valuation_sheet" ||
+          reportType === "prize_distribution" ||
+          reportType === "result_announcement";
 
         const matchesStageLocation =
           !stageFilterEnabled ||
@@ -1585,6 +1614,20 @@ export default function ReportsPage() {
         const programme = getProgramme(result.programme_id);
         if (!programme) return false;
 
+        // Prize Distribution shows only published podium winners.
+        // Stage / Off-stage applies only to Prize Distribution here.
+        if (reportType === "prize_distribution") {
+          const position = Number(result.position);
+          if (position !== 1 && position !== 2 && position !== 3) return false;
+
+          if (
+            stageLocationFilter !== "all" &&
+            normalizeStageLocation(programme.stage_type) !== stageLocationFilter
+          ) {
+            return false;
+          }
+        }
+
         if (
           categoryFilter !== "all" &&
           !(categoryFilter === "general" && !programme.category_id) &&
@@ -1662,6 +1705,8 @@ export default function ReportsPage() {
       });
   }, [
     results,
+    reportType,
+    stageLocationFilter,
     programmeFilter,
     categoryFilter,
     classFilter,
@@ -1673,6 +1718,195 @@ export default function ReportsPage() {
     students,
     teams,
     categories,
+  ]);
+
+  const resultAnnouncementRows = useMemo<ResultAnnouncementRow[]>(() => {
+    return results
+      .filter((result) => {
+        // This sheet is intentionally available BEFORE publication. It uses the
+        // calculated result rows as soon as mark entry has produced a position.
+        const position = Number(result.position);
+        if (position !== 1 && position !== 2 && position !== 3) return false;
+
+        // Never announce absent/disqualified/zero-mark entries as prize winners.
+        const normalizedGrade = String(result.grade || "")
+          .trim()
+          .toLowerCase();
+        if (
+          normalizedGrade === "absent" ||
+          normalizedGrade === "disqualified" ||
+          normalizedGrade === "dq"
+        ) {
+          return false;
+        }
+
+        const effectiveMark = Math.max(
+          Number(result.average_mark || 0),
+          Number(result.total_mark || 0),
+        );
+        if (effectiveMark <= 0) return false;
+
+        if (
+          programmeFilter !== "all" &&
+          result.programme_id !== programmeFilter
+        ) {
+          return false;
+        }
+
+        const programme = getProgramme(result.programme_id);
+        if (!programme) return false;
+
+        if (
+          stageLocationFilter !== "all" &&
+          normalizeStageLocation(programme.stage_type) !== stageLocationFilter
+        ) {
+          return false;
+        }
+
+        if (
+          categoryFilter !== "all" &&
+          !(categoryFilter === "general" && !programme.category_id) &&
+          programme.category_id !== categoryFilter
+        ) {
+          return false;
+        }
+
+        const registration = registrations.find(
+          (item) => item.id === result.registration_id,
+        );
+        if (!registration) return false;
+
+        const memberStudents =
+          programme.programme_type === "group"
+            ? registrations
+                .filter(
+                  (item) =>
+                    item.programme_id === registration.programme_id &&
+                    item.team_id === registration.team_id &&
+                    item.group_name === registration.group_name,
+                )
+                .map((item) => getStudent(item.student_id))
+                .filter(Boolean) as Student[]
+            : ([getStudent(registration.student_id)].filter(Boolean) as Student[]);
+
+        const effectiveTeamId =
+          registration.team_id || memberStudents[0]?.team_id || null;
+
+        if (teamFilter !== "all" && effectiveTeamId !== teamFilter) {
+          return false;
+        }
+
+        if (
+          classFilter !== "all" &&
+          !memberStudents.some((student) => student.class_id === classFilter)
+        ) {
+          return false;
+        }
+
+        if (
+          genderFilter !== "all" &&
+          !memberStudents.some(
+            (student) => normalizeGender(student.gender) === genderFilter,
+          )
+        ) {
+          return false;
+        }
+
+        const keyword = search.trim().toLowerCase();
+        if (keyword) {
+          const searchableText = [
+            programme.name,
+            getCategoryName(programme.category_id),
+            registration.group_name || "",
+            getTeamName(effectiveTeamId),
+            getProgrammeCode(result.registration_id)?.code_letter || "",
+            ...memberStudents.map((student) => student.name),
+            ...memberStudents.map((student) => cleanChest(student.chest_no)),
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          if (!searchableText.includes(keyword)) return false;
+        }
+
+        return true;
+      })
+      .map((result) => {
+        const programme = getProgramme(result.programme_id)!;
+        const registration = registrations.find(
+          (item) => item.id === result.registration_id,
+        )!;
+
+        const memberStudents =
+          programme.programme_type === "group"
+            ? registrations
+                .filter(
+                  (item) =>
+                    item.programme_id === registration.programme_id &&
+                    item.team_id === registration.team_id &&
+                    item.group_name === registration.group_name,
+                )
+                .map((item) => getStudent(item.student_id))
+                .filter(Boolean) as Student[]
+            : ([getStudent(registration.student_id)].filter(Boolean) as Student[]);
+
+        const memberNames = memberStudents.map((student) => student.name);
+        const participantName =
+          programme.programme_type === "group"
+            ? [registration.group_name, memberNames.join(", ")]
+                .filter(Boolean)
+                .join(" — ") || "Group"
+            : memberNames[0] || "Student";
+
+        const chestNo = memberStudents
+          .map((student) => cleanChest(student.chest_no))
+          .filter(Boolean)
+          .join(", ") || "-";
+
+        const effectiveTeamId =
+          registration.team_id || memberStudents[0]?.team_id || null;
+
+        return {
+          resultId: result.id,
+          programmeId: programme.id,
+          programmeName: programme.name,
+          categoryName: getCategoryName(programme.category_id),
+          programmeType: programme.programme_type,
+          stageType: programme.stage_type,
+          gender: programme.gender_scope,
+          totalMarks: Number(programme.total_marks || 100),
+          position: Number(result.position),
+          codeLetter:
+            getProgrammeCode(result.registration_id)?.code_letter || "-",
+          chestNo,
+          participantName,
+          teamName: getTeamName(effectiveTeamId),
+          points: Number(result.points || 0),
+        } satisfies ResultAnnouncementRow;
+      })
+      .sort((a, b) => {
+        const programmeA = getProgramme(a.programmeId)?.sort_order ?? 9999;
+        const programmeB = getProgramme(b.programmeId)?.sort_order ?? 9999;
+        if (programmeA !== programmeB) return programmeA - programmeB;
+        if (a.position !== b.position) return a.position - b.position;
+        return a.participantName.localeCompare(b.participantName);
+      });
+  }, [
+    results,
+    reportType,
+    stageLocationFilter,
+    programmeFilter,
+    categoryFilter,
+    classFilter,
+    genderFilter,
+    teamFilter,
+    search,
+    programmes,
+    registrations,
+    students,
+    teams,
+    categories,
+    programmeCodes,
   ]);
 
   const teamPoints = useMemo(() => {
@@ -2346,6 +2580,7 @@ export default function ReportsPage() {
       reportType === "valuation_sheet" ||
       reportType === "common_valuation_sheet" ||
       reportType === "call_list" ||
+      reportType === "result_announcement" ||
       reportType === "registration_sheet";
 
     if (fixedLogicalPageReport) {
@@ -2953,6 +3188,19 @@ export default function ReportsPage() {
       });
     }
 
+    if (reportType === "result_announcement") {
+      return resultAnnouncementRows.map((row) => ({
+        Programme: row.programmeName,
+        Category: row.categoryName,
+        Place: getPositionLabel(row.position),
+        Letter: row.codeLetter,
+        "Chest No": row.chestNo,
+        "Participant Name": row.participantName,
+        Team: row.teamName,
+        Point: row.points,
+      }));
+    }
+
     if (
       reportType === "winners_list" ||
       reportType === "prize_distribution" ||
@@ -3057,7 +3305,9 @@ export default function ReportsPage() {
     (reportType === "programme_register" ||
       reportType === "green_room" ||
       reportType === "call_list" ||
-      reportType === "valuation_sheet") &&
+      reportType === "valuation_sheet" ||
+      reportType === "prize_distribution" ||
+      reportType === "result_announcement") &&
     stageLocationFilter !== "all"
       ? "stage-location"
       : "",
@@ -3113,6 +3363,10 @@ export default function ReportsPage() {
       return encouragementGiftRows.length;
     }
 
+    if (reportType === "result_announcement") {
+      return resultAnnouncementRows.length;
+    }
+
     return resultRows.length;
   })();
 
@@ -3124,6 +3378,7 @@ export default function ReportsPage() {
     if (reportType === "participant_list") return "students";
     if (reportType === "top_scorers") return "scorers";
     if (reportType === "encouragement_gift") return "students";
+    if (reportType === "result_announcement") return "announcement rows";
     if (
       reportType === "winners_list" ||
       reportType === "prize_distribution" ||
@@ -4001,7 +4256,9 @@ export default function ReportsPage() {
 
                   {(reportType === "green_room" ||
                     reportType === "call_list" ||
-                    reportType === "valuation_sheet") && (
+                    reportType === "valuation_sheet" ||
+                    reportType === "prize_distribution" ||
+                    reportType === "result_announcement") && (
                     <SelectBox label="Stage / Off-stage">
                       <select
                         value={stageLocationFilter}
@@ -5084,6 +5341,7 @@ export default function ReportsPage() {
                       chestInfoBoxRadiusMm={chestInfoBoxRadiusMm}
                       onChestTextPositionChange={updateChestTextPosition}
                       resultRows={resultRows}
+                      resultAnnouncementRows={resultAnnouncementRows}
                       teamPoints={teamPoints}
                       topScorerRows={topScorerRows}
                       getCategoryName={getCategoryName}
@@ -5947,6 +6205,7 @@ function ReportBody(props: any) {
     chestInfoBoxRadiusMm,
     onChestTextPositionChange,
     resultRows,
+    resultAnnouncementRows,
     teamPoints,
     topScorerRows,
     getCategoryName,
@@ -6008,6 +6267,19 @@ function ReportBody(props: any) {
         organization={organization}
         eventInfo={eventInfo}
         dateText={dateText}
+      />
+    );
+  }
+
+  if (reportType === "result_announcement") {
+    return (
+      <ResultAnnouncementSheets
+        rows={resultAnnouncementRows}
+        compactMode={compactMode}
+        organization={organization}
+        eventInfo={eventInfo}
+        dateText={dateText}
+        getPositionLabel={getPositionLabel}
       />
     );
   }
@@ -6301,6 +6573,103 @@ function ReportBody(props: any) {
         </div>
       )}
     </>
+  );
+}
+
+function ResultAnnouncementSheets({
+  rows,
+  compactMode,
+  organization,
+  eventInfo,
+  dateText,
+  getPositionLabel,
+}: {
+  rows: ResultAnnouncementRow[];
+  compactMode: boolean;
+  organization: Organization | null;
+  eventInfo: EventInfo | null;
+  dateText: string;
+  getPositionLabel: (position: number | null) => string;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="p-10 text-center text-sm font-bold text-slate-500">
+        No calculated 1st, 2nd or 3rd place results were found for the selected filters.
+      </div>
+    );
+  }
+
+  const groups = new Map<string, ResultAnnouncementRow[]>();
+  rows.forEach((row) => {
+    if (!groups.has(row.programmeId)) groups.set(row.programmeId, []);
+    groups.get(row.programmeId)!.push(row);
+  });
+
+  return (
+    <div>
+      {Array.from(groups.values()).map((programmeRows) => {
+        const first = programmeRows[0];
+        const sortedRows = [...programmeRows].sort(
+          (a, b) => a.position - b.position,
+        );
+
+        return (
+          <div
+            key={first.programmeId}
+            className="programme-sheet bg-white p-6"
+          >
+            <SingleProgrammeHeader
+              title="Result Announcement Sheet"
+              subtitle="Pre-publish announcer copy"
+              organization={organization}
+              eventInfo={eventInfo}
+              dateText={dateText}
+              programmeName={first.programmeName}
+              categoryName={first.categoryName}
+              typeLabel="Type"
+              typeText={formatProgrammeType(first.programmeType)}
+              stageText={formatStageType(first.stageType)}
+              marks={first.totalMarks}
+              totalEntries={sortedRows.length}
+            />
+
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-[11px] font-black uppercase tracking-[0.14em] text-amber-800">
+              Announcer copy — verify before public result publication
+            </div>
+
+            <ReportTable
+              compactMode={compactMode}
+              noOuterPadding
+              headers={[
+                "Place",
+                "Letter",
+                "Chest No",
+                "Participant Name",
+                "Team",
+                "Point",
+              ]}
+              rows={sortedRows.map((row) => [
+                getPositionLabel(row.position),
+                row.codeLetter || "-",
+                row.chestNo || "-",
+                row.participantName || "-",
+                row.teamName || "-",
+                row.points,
+              ])}
+            />
+
+            <div className="mt-10 grid grid-cols-2 gap-12 text-xs font-black text-slate-700">
+              <div className="border-t border-slate-400 pt-2">
+                Result Verified By:
+              </div>
+              <div className="border-t border-slate-400 pt-2">
+                Announcer Signature:
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

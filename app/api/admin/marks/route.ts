@@ -4,6 +4,7 @@ import {
   authorizeInstitutionAdmin,
 } from "@/lib/admin-api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeZeroMarkAwards } from "@/lib/result-award-eligibility-server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -58,7 +59,17 @@ export async function POST(request: NextRequest) {
 
     if (error) return apiError(error.message, 409);
 
-    return NextResponse.json({ success: true, calculation: data });
+    const normalization = await normalizeZeroMarkAwards({
+      organizationId: authorization.admin.organizationId,
+      eventId: authorization.admin.eventId,
+      programmeId,
+    });
+
+    return NextResponse.json({
+      success: true,
+      calculation: data,
+      normalization,
+    });
   } catch (error: any) {
     return apiError(error?.message || "Unable to save marks.", 500);
   }

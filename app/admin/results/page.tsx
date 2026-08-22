@@ -111,6 +111,30 @@ type ResultEntry = {
   memberNames: string[];
 };
 
+function isAbsentResult(result: ResultItem) {
+  return String(result.grade || "").trim().toLowerCase() === "absent";
+}
+
+function isDisqualifiedResult(result: ResultItem) {
+  if (isAbsentResult(result)) return false;
+
+  const finalAverage = Number(
+    result.average_mark ?? result.total_mark ?? 0,
+  );
+
+  return !Number.isFinite(finalAverage) || finalAverage <= 0;
+}
+
+function getResultDisplayGrade(result: ResultItem) {
+  if (isAbsentResult(result)) return "Absent";
+  if (isDisqualifiedResult(result)) return "Disqualified";
+  return result.grade || "-";
+}
+
+function getResultDisplayPoints(result: ResultItem) {
+  return isDisqualifiedResult(result) ? 0 : Number(result.points || 0);
+}
+
 export default function ResultsPage() {
   const [orgUser, setOrgUser] = useState<OrganizationUser | null>(null);
   const [eventInfo, setEventInfo] = useState<EventInfo | null>(null);
@@ -204,7 +228,10 @@ export default function ResultsPage() {
         const teamId = registration?.team_id || null;
         if (!teamId) return;
 
-        map.set(teamId, (map.get(teamId) || 0) + Number(result.points || 0));
+        map.set(
+          teamId,
+          (map.get(teamId) || 0) + getResultDisplayPoints(result),
+        );
       });
 
     return Array.from(map.entries())
@@ -498,7 +525,12 @@ export default function ResultsPage() {
     }
 
     const entries = getProgrammeResults(programmeId)
-      .filter((result) => result.grade !== "Absent")
+      .filter(
+        (result) =>
+          !isAbsentResult(result) &&
+          !isDisqualifiedResult(result) &&
+          [1, 2, 3].includes(Number(result.position || 0)),
+      )
       .map((result) => buildResultEntry(result, programme))
       .sort((a, b) => {
         const aPos = a.result.position || 9999;
@@ -508,9 +540,12 @@ export default function ResultsPage() {
         return Number(b.result.total_mark || 0) - Number(a.result.total_mark || 0);
       });
 
-    const first = entries[0];
-    const second = entries[1];
-    const third = entries[2];
+    const first =
+      entries.find((entry) => entry.result.position === 1) || null;
+    const second =
+      entries.find((entry) => entry.result.position === 2) || null;
+    const third =
+      entries.find((entry) => entry.result.position === 3) || null;
 
     return {
       result_label: "RESULT",
@@ -1399,10 +1434,20 @@ function ResultPreviewModal({
                   {entries.map((entry) => (
                     <tr key={entry.result.id} className="transition hover:bg-slate-50">
                       <td className="px-5 py-4">
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-700">
-                          {entry.result.grade === "Absent"
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-black ${
+                            isDisqualifiedResult(entry.result)
+                              ? "bg-red-50 text-red-700"
+                              : isAbsentResult(entry.result)
+                                ? "bg-slate-100 text-slate-600"
+                                : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {isAbsentResult(entry.result)
                             ? "Absent"
-                            : getPositionLabel(entry.result.position)}
+                            : isDisqualifiedResult(entry.result)
+                              ? "Disqualified"
+                              : getPositionLabel(entry.result.position)}
                         </span>
                       </td>
 
@@ -1437,13 +1482,19 @@ function ResultPreviewModal({
                       </td>
 
                       <td className="px-5 py-4">
-                        <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700">
-                          {entry.result.grade || "-"}
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-black ${
+                            isDisqualifiedResult(entry.result)
+                              ? "bg-red-50 text-red-700"
+                              : "bg-violet-50 text-violet-700"
+                          }`}
+                        >
+                          {getResultDisplayGrade(entry.result)}
                         </span>
                       </td>
 
                       <td className="px-5 py-4 text-sm font-black text-slate-700">
-                        {entry.result.points} pts
+                        {getResultDisplayPoints(entry.result)} pts
                       </td>
 
                       <td className="px-5 py-4">

@@ -107,9 +107,10 @@ type CalculatedEntry = {
   registrationId: string;
   code: string;
   average: number;
-  position: number;
+  position: number | null;
   grade: string;
   points: number;
+  disqualified: boolean;
 };
 
 
@@ -479,8 +480,16 @@ export default function MarkEntryPage() {
       average: number;
     }>;
 
-    return competitionRanks(
-      completedEntries,
+    const eligibleEntries = completedEntries.filter(
+      (item) => item.average > 0,
+    );
+
+    const disqualifiedEntries = completedEntries.filter(
+      (item) => item.average <= 0,
+    );
+
+    const rankedEntries: CalculatedEntry[] = competitionRanks(
+      eligibleEntries,
       (item) => item.average,
     ).map(({ row, position }) => ({
       ...row,
@@ -496,7 +505,20 @@ export default function MarkEntryPage() {
           ? groupPointRules
           : individualPointRules,
       ),
+      disqualified: false,
     }));
+
+    const zeroMarkEntries: CalculatedEntry[] = disqualifiedEntries.map(
+      (row) => ({
+        ...row,
+        position: null,
+        grade: "Disqualified",
+        points: 0,
+        disqualified: true,
+      }),
+    );
+
+    return [...rankedEntries, ...zeroMarkEntries];
   }, [
     programme,
     activeJudges,
@@ -1572,8 +1594,9 @@ export default function MarkEntryPage() {
               </h3>
 
               <p className="mt-1 text-sm font-bold text-slate-500">
-                Preview updates automatically while entering
-                marks.
+                Preview updates automatically while entering marks. Participants
+                with a final average of 0 are disqualified, receive no rank and
+                receive 0 points.
               </p>
             </div>
 
@@ -1605,8 +1628,14 @@ export default function MarkEntryPage() {
                         {formatMark(item.average)}
                       </p>
 
-                      <p className="mt-1 text-[10px] font-black uppercase text-slate-400">
-                        Rank #{item.position}
+                      <p
+                        className={`mt-1 text-[10px] font-black uppercase ${
+                          item.disqualified ? "text-red-500" : "text-slate-400"
+                        }`}
+                      >
+                        {item.disqualified
+                          ? "Disqualified"
+                          : `Rank #${item.position}`}
                       </p>
                     </div>
                   </div>
@@ -1663,8 +1692,16 @@ function InfoCard({
 function RankBadge({
   position,
 }: {
-  position: number;
+  position: number | null;
 }) {
+  if (!position) {
+    return (
+      <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-700">
+        Disqualified
+      </span>
+    );
+  }
+
   let label = `#${position}`;
 
   if (position === 1) label = "🥇 1st";

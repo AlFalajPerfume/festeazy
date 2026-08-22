@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { getJudgeSession } from "@/lib/judge-session-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeZeroMarkAwards } from "@/lib/result-award-eligibility-server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -152,9 +153,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const normalization = await normalizeZeroMarkAwards({
+      organizationId: judge.organization_id,
+      eventId: judge.event_id,
+      programmeId,
+    });
+
     return NextResponse.json({
       success: true,
       calculation: data,
+      normalization,
     });
   } catch (error: any) {
     return NextResponse.json(
